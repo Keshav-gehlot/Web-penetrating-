@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
-import { Shield, AlertTriangle, Zap, Server, ArrowUpRight, ArrowDownRight, Clock, CheckCircle } from 'lucide-react';
+import { Shield, AlertTriangle, Zap, Server, ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const scanData = [
@@ -12,10 +12,10 @@ const scanData = [
 ];
 
 const vulnData = [
-  { name: 'Critical', value: 12, color: 'var(--color-phantom-coral)' },
-  { name: 'High', value: 45, color: 'var(--color-phantom-amber)' },
-  { name: 'Medium', value: 128, color: 'var(--color-phantom-cyan)' },
-  { name: 'Low', value: 312, color: 'var(--color-phantom-text-tertiary)' },
+  { name: 'Critical', value: 12, delta: '+2', color: 'var(--color-phantom-coral)' },
+  { name: 'High', value: 45, delta: '-4', color: 'var(--color-phantom-amber)' },
+  { name: 'Medium', value: 128, delta: '+12', color: 'var(--color-phantom-cyan)' },
+  { name: 'Low', value: 312, delta: '0', color: 'var(--color-phantom-text-tertiary)' },
 ];
 
 export default function Dashboard() {
@@ -24,7 +24,14 @@ export default function Dashboard() {
       {/* Header */}
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-phantom-text-primary tracking-tight">Overview</h1>
+           <div className="flex items-center gap-3 mb-1">
+             <h1 className="text-2xl font-semibold text-phantom-text-primary tracking-tight">Overview</h1>
+             <div className="flex -space-x-2 ml-4">
+               <Avatar seed="Emma" />
+               <Avatar seed="James" />
+             </div>
+             <span className="text-xs text-phantom-text-tertiary font-medium px-2">3 viewing</span>
+           </div>
           <p className="text-sm text-phantom-text-tertiary mt-1">Real-time infrastructure security posture.</p>
         </div>
         <div className="flex items-center gap-3">
@@ -41,10 +48,10 @@ export default function Dashboard() {
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard title="Risk Score" value="78/100" trend="+2.4" icon={Shield} color="text-phantom-cyan" />
-        <MetricCard title="Critical Exposures" value="12" trend="-3" icon={AlertTriangle} color="text-phantom-coral" trendDownIsGood />
-        <MetricCard title="Active Scans" value="4" trend="+1" icon={Zap} color="text-phantom-text-primary" />
-        <MetricCard title="Assets Monitored" value="1,204" trend="+12" icon={Server} color="text-phantom-text-primary" />
+        <MetricCard title="Risk Score" value="78/100" trend="+2.4 vs last week" icon={Shield} color="text-phantom-cyan" />
+        <MetricCard title="Critical Exposures" value="12" trend="-3 resolved today" icon={AlertTriangle} color="text-phantom-coral" trendDownIsGood />
+        <MetricCard title="Active Scans" value="4" trend="12 worker nodes busy" icon={Zap} color="text-phantom-text-primary" />
+        <MetricCard title="Assets Monitored" value="1,204" trend="+12 new discovered" icon={Server} color="text-phantom-text-primary" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -81,18 +88,35 @@ export default function Dashboard() {
 
         {/* Severity Breakdown */}
         <div className="bg-phantom-surface border border-phantom-border rounded-xl p-5 flex flex-col shadow-sm">
-          <h2 className="text-sm font-semibold text-phantom-text-secondary mb-6">Open Vulnerabilities</h2>
+          <div className="flex justify-between items-center mb-6">
+             <h2 className="text-sm font-semibold text-phantom-text-secondary">Open Vulnerabilities</h2>
+             <span className="text-[10px] font-mono text-phantom-text-tertiary px-2 py-0.5 rounded bg-phantom-bg border border-phantom-border">DELTA MODE</span>
+          </div>
           <div className="flex-1 flex flex-col justify-center">
             <div className="space-y-4">
-              {vulnData.map((item, index) => (
-                <div key={item.name} className="flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-sm font-medium text-phantom-text-primary">{item.name}</span>
+              {vulnData.map((item, index) => {
+                const isPositive = item.delta.startsWith('+');
+                const isZero = item.delta === '0';
+                return (
+                <div key={item.name} className="flex flex-col group gap-2 border-b border-phantom-border/50 pb-3 last:border-0 last:pb-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm font-medium text-phantom-text-primary">{item.name}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={cn(
+                        "text-[10px] font-mono px-1.5 py-0.5 rounded",
+                        isZero ? "text-phantom-text-tertiary bg-transparent" :
+                        isPositive ? "text-phantom-coral bg-phantom-coral/10 border border-phantom-coral/20" : 
+                        "text-phantom-cyan bg-phantom-cyan/10 border border-phantom-cyan/20"
+                      )}>
+                        {item.delta}
+                      </span>
+                      <span className="text-sm font-mono text-phantom-text-secondary w-8 text-right">{item.value}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-mono text-phantom-text-secondary">{item.value}</span>
-                    <div className="w-24 h-1.5 bg-phantom-panel border border-phantom-border rounded-full overflow-hidden">
+                  <div className="w-full h-1.5 bg-phantom-panel border border-phantom-border rounded-full overflow-hidden">
                       <motion.div 
                         initial={{ width: 0 }}
                         animate={{ width: `${(item.value / 312) * 100}%` }}
@@ -100,12 +124,11 @@ export default function Dashboard() {
                         className="h-full rounded-full"
                         style={{ backgroundColor: item.color }}
                       />
-                    </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
-            <div className="mt-8 pt-4 border-t border-phantom-border">
+            <div className="mt-6 pt-4 border-t border-phantom-border flex justify-between items-center">
                <button className="text-xs text-phantom-cyan hover:text-phantom-text-primary transition-colors flex items-center gap-1">
                  View complete findings matrix <ArrowUpRight size={12} />
                </button>
@@ -114,28 +137,59 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Activity / Logs */}
-      <div className="mt-2">
-        <h2 className="text-sm font-semibold text-phantom-text-secondary mb-4">Latest Activity</h2>
-        <div className="border border-phantom-border rounded-xl bg-phantom-surface overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-phantom-border">
-                <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Target</th>
-                <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Type</th>
-                <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Duration</th>
-                <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider text-right">Time</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm">
-              <ActivityRow status="running" target="api.internal.corp" type="Deep Scan" duration="45m (running)" time="Just now" />
-              <ActivityRow status="completed" target="auth.prod.gateway" type="Quick Scan" duration="12m 4s" time="2h ago" />
-              <ActivityRow status="failed" target="legacy-db-01" type="Dependency Check" duration="2m 1s" time="4h ago" />
-              <ActivityRow status="completed" target="cdn.global.assets" type="Subdomain Enum" duration="18m 22s" time="5h ago" />
-            </tbody>
-          </table>
-        </div>
+      {/* Infrastructure Readiness & Latest Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-2">
+         <div className="lg:col-span-1 p-5 rounded-xl border border-phantom-border bg-phantom-surface flex flex-col">
+            <h2 className="text-sm font-semibold text-phantom-text-secondary mb-4 flex items-center gap-2"><Activity size={14}/> System Status</h2>
+            <div className="space-y-4">
+               <div>
+                  <div className="flex justify-between text-xs mb-1">
+                     <span className="text-phantom-text-tertiary">Worker Nodes</span>
+                     <span className="text-phantom-text-primary font-mono">12 / 16 active</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-phantom-panel rounded overflow-hidden">
+                     <div className="h-full w-3/4 bg-phantom-cyan"></div>
+                  </div>
+               </div>
+               <div>
+                  <div className="flex justify-between text-xs mb-1">
+                     <span className="text-phantom-text-tertiary">Scan Queue</span>
+                     <span className="text-phantom-text-primary font-mono">3 pending</span>
+                  </div>
+               </div>
+               <div>
+                  <div className="flex justify-between text-xs mb-1">
+                     <span className="text-phantom-text-tertiary">API Rate Limit</span>
+                     <span className="text-phantom-text-primary font-mono">4.2k / 10k req/m</span>
+                  </div>
+               </div>
+            </div>
+         </div>
+
+         <div className="lg:col-span-3">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-phantom-text-secondary">Latest Activity</h2>
+          </div>
+          <div className="border border-phantom-border rounded-xl bg-phantom-surface overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-phantom-border bg-phantom-panel/30">
+                  <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Target</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Type</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Duration</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider text-right">Time</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm">
+                <ActivityRow status="running" target="api.internal.corp" type="Deep Scan" duration="45m (running)" time="Just now" />
+                <ActivityRow status="completed" target="auth.prod.gateway" type="Quick Scan" duration="12m 4s" time="2h ago" />
+                <ActivityRow status="failed" target="legacy-db-01" type="Dependency Check" duration="2m 1s" time="4h ago" />
+                <ActivityRow status="completed" target="cdn.global.assets" type="Subdomain Enum" duration="18m 22s" time="5h ago" />
+              </tbody>
+            </table>
+          </div>
+         </div>
       </div>
     </div>
   );
@@ -186,17 +240,25 @@ function ActivityRow({ status, target, type, duration, time }: any) {
   }
 
   return (
-    <tr className="border-b border-phantom-border last:border-0 table-row-hover transition-colors cursor-pointer group">
+    <tr className="border-b border-phantom-border/50 last:border-0 table-row-hover transition-colors cursor-pointer group">
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <StatusIcon size={14} className={statusColor} />
-          <span className="capitalize text-phantom-text-secondary group-hover:text-phantom-text-primary transition-colors">{status}</span>
+          <span className="capitalize text-xs font-medium text-phantom-text-secondary group-hover:text-phantom-text-primary transition-colors">{status}</span>
         </div>
       </td>
       <td className="px-4 py-3 font-mono text-xs">{target}</td>
-      <td className="px-4 py-3 text-phantom-text-secondary">{type}</td>
+      <td className="px-4 py-3 text-phantom-text-secondary text-xs">{type}</td>
       <td className="px-4 py-3 text-phantom-text-tertiary text-xs">{duration}</td>
       <td className="px-4 py-3 text-right text-phantom-text-tertiary text-xs">{time}</td>
     </tr>
+  );
+}
+
+function Avatar({ seed }: { seed: string }) {
+  return (
+    <div className="w-6 h-6 rounded-full overflow-hidden border-2 border-phantom-surface z-20 bg-phantom-panel">
+      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=131418`} alt="Avatar" className="w-full h-full object-cover" />
+    </div>
   );
 }

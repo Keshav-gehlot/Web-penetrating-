@@ -3,12 +3,17 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { NavigationRail } from './layout/NavigationRail';
 import { SecondarySidebar } from './layout/SecondarySidebar';
 import { CommandPalette } from './layout/CommandPalette';
+import { KeyboardShortcuts } from './layout/KeyboardShortcuts';
 
 import Dashboard from './pages/Dashboard';
 import AssetManagement from './pages/AssetManagement';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Scans from './pages/Scans';
 import LiveScan from './pages/LiveScan';
+import Reports from './pages/Reports';
+import Settings from './pages/Settings';
+import Topology from './pages/Topology';
+import Investigation from './pages/Investigation';
 
 function Placeholder() {
   return (
@@ -48,12 +53,17 @@ export default function App() {
             <Route path="/vulnerabilities" element={<Vulnerabilities />} />
             <Route path="/scans" element={<Scans />} />
             <Route path="/scans/live" element={<LiveScan />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/topology" element={<Topology />} />
+            <Route path="/investigation" element={<Investigation />} />
             <Route path="*" element={<Placeholder />} />
           </Routes>
         </div>
       </main>
 
       <CommandPalette />
+      <KeyboardShortcuts />
     </div>
   );
 }

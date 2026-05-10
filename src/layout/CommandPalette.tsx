@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Terminal, ArrowRight } from 'lucide-react';
+import { Search, Terminal, ArrowRight, Shield, FileText } from 'lucide-react';
 
 export function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -16,6 +18,11 @@ export function CommandPalette() {
     document.addEventListener('keydown', down);
     return () => document.removeEventListener('keydown', down);
   }, []);
+
+  const runCommand = (command: () => void) => {
+    setIsOpen(false);
+    command();
+  };
 
   return (
     <AnimatePresence>
@@ -53,9 +60,10 @@ export function CommandPalette() {
               <div className="p-2 max-h-[60vh] overflow-y-auto">
                 <div className="px-3 py-2 text-xs font-semibold text-phantom-text-tertiary uppercase tracking-wider">Suggestions</div>
                 <div className="space-y-1">
-                  <PaletteItem icon={Terminal} label="Start new scan" shortcut="S" />
-                  <PaletteItem icon={ArrowRight} label="Go to Assets" shortcut="G A" />
-                  <PaletteItem icon={ArrowRight} label="Go to Vulnerabilities" shortcut="G V" />
+                  <PaletteItem icon={Terminal} label="Start new scan" shortcut="S" onSelect={() => runCommand(() => navigate('/scans'))} />
+                  <PaletteItem icon={ArrowRight} label="Go to Assets" shortcut="G A" onSelect={() => runCommand(() => navigate('/assets'))} />
+                  <PaletteItem icon={Shield} label="Go to Vulnerabilities" shortcut="G V" onSelect={() => runCommand(() => navigate('/vulnerabilities'))} />
+                  <PaletteItem icon={FileText} label="Go to Reports" shortcut="G R" onSelect={() => runCommand(() => navigate('/reports'))} />
                 </div>
               </div>
             </motion.div>
@@ -66,9 +74,9 @@ export function CommandPalette() {
   );
 }
 
-function PaletteItem({ icon: Icon, label, shortcut }: any) {
+function PaletteItem({ icon: Icon, label, shortcut, onSelect }: any) {
   return (
-    <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-phantom-surface text-phantom-text-secondary hover:text-phantom-text-primary transition-colors text-left group">
+    <button onClick={onSelect} className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-phantom-surface text-phantom-text-secondary hover:text-phantom-text-primary transition-colors text-left group">
       <div className="flex items-center gap-3">
         <Icon size={16} className="text-phantom-text-tertiary group-hover:text-phantom-cyan transition-colors" />
         <span className="font-medium text-sm">{label}</span>

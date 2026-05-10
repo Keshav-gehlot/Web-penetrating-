@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { 
   Activity, Server, Crosshair, ShieldAlert, 
   BookOpen, FileText, Settings, Users, 
-  Search, TerminalSquare
+  Search, TerminalSquare, Network, FlaskConical
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -11,9 +11,10 @@ import { motion } from 'motion/react';
 const NAV_ITEMS = [
   { icon: Activity, label: 'Overview', path: '/dashboard' },
   { icon: Server, label: 'Assets', path: '/assets' },
+  { icon: Network, label: 'Topology', path: '/topology' },
   { icon: Crosshair, label: 'Scans', path: '/scans' },
   { icon: ShieldAlert, label: 'Vulnerabilities', path: '/vulnerabilities' },
-  { icon: BookOpen, label: 'Intelligence', path: '/intelligence' },
+  { icon: FlaskConical, label: 'Investigation', path: '/investigation' },
   { icon: FileText, label: 'Reports', path: '/reports' },
 ];
 
@@ -51,8 +52,9 @@ export function NavigationRail() {
           <NavItem key={item.path} item={item} />
         ))}
         
-        <div className="w-10 h-10 mt-2 rounded-full overflow-hidden border border-phantom-border cursor-pointer hover:border-phantom-text-secondary transition-colors">
-          <img src="https://api.dicebear.com/7.x/notionists/svg?seed=Phantom&backgroundColor=131418" alt="User Avatar" className="w-full h-full object-cover" />
+        <div className="w-10 h-10 mt-2 rounded-full overflow-hidden border border-phantom-border cursor-pointer relative group">
+          <img src="https://api.dicebear.com/7.x/notionists/svg?seed=Phantom&backgroundColor=131418" alt="User Avatar" className="w-full h-full object-cover group-hover:opacity-80 transition-opacity" />
+          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-phantom-cyan border-2 border-phantom-bg rounded-full"></div>
         </div>
       </div>
     </nav>

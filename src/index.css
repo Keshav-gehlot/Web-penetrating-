@@ -16,7 +16,7 @@
   --color-phantom-text-secondary: #8f939e;
   --color-phantom-text-tertiary: #5e6068;
   
-  --color-phantom-cyan: #34d399; /* using a desaturated cyan/teal */
+  --color-phantom-cyan: #34d399;
   --color-phantom-cyan-muted: #064e3b;
   --color-phantom-teal: #2dd4bf;
   --color-phantom-teal-muted: #115e59;
@@ -38,6 +38,11 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+  
+  *:focus-visible {
+    outline: 2px solid var(--color-phantom-cyan);
+    outline-offset: 2px;
   }
 }
 
