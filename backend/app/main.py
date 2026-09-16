@@ -8,15 +8,19 @@ from pydantic import BaseModel, Field
 
 from .database import init_db
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     yield
 
+
 app = FastAPI(title="PHANTOM Security API", version="2.0.0", lifespan=lifespan)
+
 
 class TargetRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048)
+
 
 def normalize_target(value: str) -> str:
     value = value.strip()
@@ -26,6 +30,7 @@ def normalize_target(value: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Target must be a valid HTTP(S) hostname or URL")
     return value.rstrip("/")
+
 
 def validate_target(value: str) -> dict:
     try:
@@ -44,13 +49,16 @@ def validate_target(value: str) -> dict:
         raise HTTPException(status_code=400, detail="Private, loopback, link-local, multicast, reserved, or local targets are not allowed")
     return {"target": normalized, "host": host, "is_ip": is_ip}
 
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "phantom-api", "version": "2.0.0"}
 
+
 @app.post("/api/v1/targets/validate")
 async def target_validate(request: TargetRequest):
     return validate_target(request.target)
+
 
 @app.get("/api/v1/assets/{host}/resolve")
 async def resolve_host(host: str):
@@ -60,7 +68,11 @@ async def resolve_host(host: str):
         raise HTTPException(status_code=404, detail=f"DNS resolution failed: {exc}")
     return {"host": host, "addresses": addresses}
 
+
 from .api.scans import router as scans_router
 from .api.reports import router as reports_router
+from .api.events import router as events_router
+
 app.include_router(scans_router)
 app.include_router(reports_router)
+app.include_router(events_router)
