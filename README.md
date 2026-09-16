@@ -1,20 +1,53 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# PHANTOM Security Platform
 
-# Run and deploy your AI Studio app
+PHANTOM is an authorized security-assessment platform with a React/Vite operator console and a FastAPI assessment API.
 
-This contains everything you need to run your app locally.
+## Current implementation
 
-View your app in AI Studio: https://ai.studio/apps/7e5b099b-9d58-4f41-b481-00356b35fd46
+- 25 registered assessment modules
+- Concurrent scan runner with bounded timeouts
+- Target validation that blocks local/private/reserved destinations by default
+- DNS and subdomain discovery
+- Bounded common-port discovery
+- HTTP security-header analysis
+- TLS certificate/protocol inspection
+- Cookie and CORS auditing
+- WAF and technology fingerprinting
+- Endpoint/form inventory
+- Candidate SQLi/XSS/CSRF/SSRF/XXE/open-redirect detection without destructive exploit payloads
+- RDAP domain/IP enrichment
+- NVD CVE keyword enrichment from exposed software metadata
+- Background scan execution through FastAPI BackgroundTasks
+- JSON-normalized scan results
+- PDF assessment report generation
 
-## Run Locally
+## Run the API
 
-**Prerequisites:**  Node.js
+```bash
+cd backend
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+# Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
+API documentation is available at `/docs` when the server is running.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Scan example
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/scans \
+  -H "Content-Type: application/json" \
+  -d '{"target":"https://example.com","profile":"quick"}'
+```
+
+Use the returned scan ID with `GET /api/v1/scans/{scan_id}`. A PDF is available at `/api/v1/reports/{scan_id}.pdf` after the scan completes.
+
+## Safety boundary
+
+PHANTOM is designed for systems the operator owns or is explicitly authorized to assess. The baseline engine uses bounded, non-destructive checks. Intrusive exploit verification should be implemented only as a separately controlled workflow with explicit scope, rate limits, logging, and approval.
+
+## Frontend
+
+The existing React/Vite frontend remains the operator-console layer. The next integration step is replacing its demo state with these API endpoints and real scan events.
