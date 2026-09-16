@@ -1,59 +1,78 @@
 from __future__ import annotations
-
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
-
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Float, func
+from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Float, Boolean, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from .database import Base
 
+class Organization(Base):
+    __tablename__="organizations"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    name:Mapped[str]=mapped_column(String(160))
+    slug:Mapped[str]=mapped_column(String(80),unique=True,index=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    workspaces:Mapped[list[Workspace]]=relationship(back_populates="organization",cascade="all, delete-orphan")
+
+class Workspace(Base):
+    __tablename__="workspaces"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    organization_id:Mapped[str]=mapped_column(ForeignKey("organizations.id",ondelete="CASCADE"),index=True)
+    name:Mapped[str]=mapped_column(String(160))
+    slug:Mapped[str]=mapped_column(String(80))
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    organization:Mapped[Organization]=relationship(back_populates="workspaces")
+    members:Mapped[list[WorkspaceMember]]=relationship(back_populates="workspace",cascade="all, delete-orphan")
+    __table_args__=(UniqueConstraint("organization_id","slug",name="uq_workspace_org_slug"),)
+
+class User(Base):
+    __tablename__="users"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    email:Mapped[str]=mapped_column(String(255),unique=True,index=True)
+    display_name:Mapped[str]=mapped_column(String(120))
+    password_hash:Mapped[str]=mapped_column(String(255))
+    is_active:Mapped[bool]=mapped_column(Boolean,default=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    memberships:Mapped[list[WorkspaceMember]]=relationship(back_populates="user",cascade="all, delete-orphan")
+
+class WorkspaceMember(Base):
+    __tablename__="workspace_members"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    workspace_id:Mapped[str]=mapped_column(ForeignKey("workspaces.id",ondelete="CASCADE"),index=True)
+    user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True)
+    role:Mapped[str]=mapped_column(String(32),index=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    workspace:Mapped[Workspace]=relationship(back_populates="members")
+    user:Mapped[User]=relationship(back_populates="memberships")
+    __table_args__=(UniqueConstraint("workspace_id","user_id",name="uq_workspace_member"),)
 
 class Asset(Base):
-    __tablename__ = "assets"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    host: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    target: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    scans: Mapped[list[Scan]] = relationship(back_populates="asset")
-
+    __tablename__="assets"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    host:Mapped[str]=mapped_column(String(255),unique=True,index=True)
+    target:Mapped[str]=mapped_column(Text)
+    workspace_id:Mapped[str|None]=mapped_column(ForeignKey("workspaces.id"),nullable=True,index=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    scans:Mapped[list[Scan]]=relationship(back_populates="asset")
 
 class Scan(Base):
-    __tablename__ = "scans"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    target: Mapped[str] = mapped_column(Text)
-    host: Mapped[str] = mapped_column(String(255), index=True)
-    profile: Mapped[str] = mapped_column(String(32))
-    status: Mapped[str] = mapped_column(String(32), index=True, default="queued")
-    modules: Mapped[list[str]] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), nullable=True)
-    asset: Mapped[Asset | None] = relationship(back_populates="scans")
-    findings: Mapped[list[Finding]] = relationship(back_populates="scan", cascade="all, delete-orphan")
-
+    __tablename__="scans"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True)
+    target:Mapped[str]=mapped_column(Text); host:Mapped[str]=mapped_column(String(255),index=True)
+    profile:Mapped[str]=mapped_column(String(32)); status:Mapped[str]=mapped_column(String(32),index=True,default="queued")
+    modules:Mapped[list[str]]=mapped_column(JSON,default=list)
+    workspace_id:Mapped[str|None]=mapped_column(ForeignKey("workspaces.id"),nullable=True,index=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    started_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); completed_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
+    error:Mapped[str|None]=mapped_column(Text,nullable=True); asset_id:Mapped[str|None]=mapped_column(ForeignKey("assets.id"),nullable=True)
+    asset:Mapped[Asset|None]=relationship(back_populates="scans"); findings:Mapped[list[Finding]]=relationship(back_populates="scan",cascade="all, delete-orphan")
 
 class Finding(Base):
-    __tablename__ = "findings"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    scan_id: Mapped[str] = mapped_column(ForeignKey("scans.id", ondelete="CASCADE"), index=True)
-    module: Mapped[str] = mapped_column(String(100), index=True)
-    title: Mapped[str] = mapped_column(Text)
-    severity: Mapped[str] = mapped_column(String(20), index=True)
-    status: Mapped[str] = mapped_column(String(32), index=True, default="open")
-    fingerprint: Mapped[str] = mapped_column(String(64), index=True, default=lambda: str(uuid4()))
-    cve: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    cwe: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    cvss: Mapped[float | None] = mapped_column(Float, nullable=True)
-    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    description: Mapped[str] = mapped_column(Text, default="")
-    remediation: Mapped[str] = mapped_column(Text, default="")
-    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    confidence: Mapped[float] = mapped_column(default=1.0)
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    scan: Mapped[Scan] = relationship(back_populates="findings")
+    __tablename__="findings"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    scan_id:Mapped[str]=mapped_column(ForeignKey("scans.id",ondelete="CASCADE"),index=True); module:Mapped[str]=mapped_column(String(100),index=True)
+    title:Mapped[str]=mapped_column(Text); severity:Mapped[str]=mapped_column(String(20),index=True); status:Mapped[str]=mapped_column(String(32),index=True,default="open")
+    fingerprint:Mapped[str]=mapped_column(String(64),index=True,default=lambda:str(uuid4())); cve:Mapped[str|None]=mapped_column(String(32),nullable=True,index=True); cwe:Mapped[str|None]=mapped_column(String(32),nullable=True); cvss:Mapped[float|None]=mapped_column(Float,nullable=True)
+    assignee:Mapped[str|None]=mapped_column(String(255),nullable=True); description:Mapped[str]=mapped_column(Text,default=""); remediation:Mapped[str]=mapped_column(Text,default=""); evidence:Mapped[dict[str,Any]]=mapped_column(JSON,default=dict); confidence:Mapped[float]=mapped_column(default=1.0)
+    first_seen:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); last_seen:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    scan:Mapped[Scan]=relationship(back_populates="findings")
