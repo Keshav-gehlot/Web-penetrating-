@@ -1,25 +1,13 @@
 const API_BASE = (import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
+export type ScanProfile = 'quick' | 'standard' | 'deep' | 'trust';
+
 export type Scan = {
-  id: string;
-  target: string;
-  host: string;
-  profile: string;
-  modules: string[];
-  status: string;
-  created_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  error?: string | null;
+  id: string; target: string; host: string; profile: string; modules: string[]; status: string;
+  created_at: string | null; started_at: string | null; completed_at: string | null; error?: string | null;
 };
 
-export type FindingEvent = {
-  id: string;
-  module: string;
-  title: string;
-  severity: string;
-  confidence: number;
-};
+export type FindingEvent = { id: string; module: string; title: string; severity: string; confidence: number };
 
 export type ScanEvent =
   | { event: 'connected' | 'scan.created' | 'scan.started' | 'scan.completed'; scan_id: string }
@@ -28,22 +16,13 @@ export type ScanEvent =
   | { event: 'finding.created'; scan_id: string; finding: FindingEvent };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `PHANTOM API request failed (${response.status})`);
-  }
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+  if (!response.ok) throw new Error((await response.text()) || `PHANTOM API request failed (${response.status})`);
   return response.json() as Promise<T>;
 }
 
-export function createScan(target: string, profile: 'quick' | 'standard' | 'deep' = 'standard') {
-  return request<Scan>('/api/v1/scans', {
-    method: 'POST',
-    body: JSON.stringify({ target, profile }),
-  });
+export function createScan(target: string, profile: ScanProfile = 'standard') {
+  return request<Scan>('/api/v1/scans', { method: 'POST', body: JSON.stringify({ target, profile }) });
 }
 
 export function getScan(scanId: string) {
