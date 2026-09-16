@@ -1,27 +1,35 @@
 # PHANTOM Security Platform
 
-PHANTOM is an authorized security-assessment platform with a React/Vite operator console and a FastAPI assessment API.
+PHANTOM is an original, workspace-scoped security assessment platform built for authorized testing. It combines a React/Vite operator console with a FastAPI API, PostgreSQL persistence, Redis Streams job orchestration, and a native Python worker.
 
-## Current implementation
+## Architecture
 
-- 25 registered assessment modules
-- Concurrent scan runner with bounded timeouts
-- Target validation that blocks local/private/reserved destinations by default
-- DNS and subdomain discovery
-- Bounded common-port discovery
-- HTTP security-header analysis
-- TLS certificate/protocol inspection
-- Cookie and CORS auditing
-- WAF and technology fingerprinting
-- Endpoint/form inventory
-- Candidate SQLi/XSS/CSRF/SSRF/XXE/open-redirect detection without destructive exploit payloads
-- RDAP domain/IP enrichment
-- NVD CVE keyword enrichment from exposed software metadata
-- Background scan execution through FastAPI BackgroundTasks
-- JSON-normalized scan results
-- PDF assessment report generation
+```text
+React / Vite :5173
+      │ HTTPS / WebSocket
+      ▼
+FastAPI :8000
+ ├── Auth + RBAC
+ ├── Assets / Scans / Findings
+ ├── Investigation / Reports / Audit
+ └── Health / Readiness
+      │
+      ├───────────────┐
+      ▼               ▼
+PostgreSQL :5432   Redis :6379
+                       │
+                       ▼
+                 Redis Streams
+                       │
+                       ▼
+                Native PHANTOM Worker
+```
 
-## Run the API
+Docker is not required or used by the project.
+
+## Local setup
+
+Start PostgreSQL and Redis natively, then:
 
 ```bash
 cd backend
@@ -29,25 +37,43 @@ python -m venv .venv
 # Windows: .venv\\Scripts\\activate
 # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
 ```
 
-API documentation is available at `/docs` when the server is running.
-
-## Scan example
+In another terminal, from `backend`:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/scans \
-  -H "Content-Type: application/json" \
-  -d '{"target":"https://example.com","profile":"quick"}'
+python -m app.worker
 ```
 
-Use the returned scan ID with `GET /api/v1/scans/{scan_id}`. A PDF is available at `/api/v1/reports/{scan_id}.pdf` after the scan completes.
+Then from the repository root:
 
-## Safety boundary
+```bash
+npm install
+npm run dev
+```
 
-PHANTOM is designed for systems the operator owns or is explicitly authorized to assess. The baseline engine uses bounded, non-destructive checks. Intrusive exploit verification should be implemented only as a separately controlled workflow with explicit scope, rate limits, logging, and approval.
+The operator console runs on `http://127.0.0.1:5173` and the API on `http://localhost:8000`.
 
-## Frontend
+## Database
 
-The existing React/Vite frontend remains the operator-console layer. The next integration step is replacing its demo state with these API endpoints and real scan events.
+Alembic owns schema changes. Run `alembic upgrade head` before starting the API against a new database. Application startup performs bootstrap data creation only; it does not mutate table definitions.
+
+## Authentication
+
+The default development bootstrap values come from environment variables. Change `PHANTOM_AUTH_SECRET` and `PHANTOM_BOOTSTRAP_PASSWORD` before using PHANTOM outside local development.
+
+## Scan controls
+
+The worker uses Redis Streams consumer groups with acknowledgement and stale-message recovery. Scan execution uses database worker ownership, renewable leases, bounded module/total timeouts, retry attempts, and a distributed scan-concurrency slot pool.
+
+Targets are validated before execution. Private, local, loopback, link-local, multicast, and reserved destinations are rejected by default.
+
+## Implemented assessment coverage
+
+PHANTOM currently includes bounded discovery, DNS/subdomain checks, common-port checks, HTTP/TLS/header analysis, cookie and CORS auditing, WAF/technology detection, endpoint/form inventory, trust auditing, RDAP/CVE enrichment, and candidate SQLi/XSS/CSRF/SSRF/XXE/open-redirect signals without destructive exploit automation.
+
+## Security boundary
+
+Use PHANTOM only against systems you own or have explicit authorization to assess. The baseline scanner intentionally avoids unrestricted exploit execution and keeps network activity bounded.
