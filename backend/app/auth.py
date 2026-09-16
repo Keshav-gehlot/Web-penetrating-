@@ -1,9 +1,10 @@
 from __future__ import annotations
-import hashlib,hmac
+import base64, hashlib, hmac, json, os, secrets
 from dataclasses import dataclass
-from datetime import datetime,timedelta,timezone
-from fastapi import Header,HTTPException
-from pydantic import BaseModel,Field
+from datetime import datetime, timedelta, timezone
+from fastapi import Header, HTTPException
+from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 from .config import settings
 @dataclass(frozen=True)
 class Principal:
@@ -25,3 +26,29 @@ def principal_from_token(token:str)->Principal:
 async def current_principal(authorization:str|None=Header(default=None))->Principal:
     if not authorization or not authorization.lower().startswith("bearer "):raise HTTPException(401,"Authentication required")
     return principal_from_token(authorization[7:].strip())
+WS_TICKET_TTL_SECONDS=max(30,int(os.getenv("PHANTOM_WS_TICKET_TTL_SECONDS","60")))
+def _ws_encode(payload:dict)->str:
+    raw=json.dumps(payload,separators=(",",":"),sort_keys=True).encode();body=base64.urlsafe_b64encode(raw).rstrip(b"=").decode();return f"ws.{body}.{_sign(body)}"
+def _ws_decode(token:str)->dict:
+    try:
+        prefix,body,signature=token.split(".",2)
+        if prefix!="ws" or not hmac.compare_digest(signature,_sign(body)):raise ValueError
+        padded=body+"="*((4-len(body)%4)%4);return json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+    except Exception as exc:raise HTTPException(401,"Invalid WebSocket ticket") from exc
+async def issue_ws_ticket(principal:Principal,scan_id:str)->str:
+    nonce=secrets.token_urlsafe(24);exp=int((datetime.now(timezone.utc)+timedelta(seconds=WS_TICKET_TTL_SECONDS)).timestamp())
+    payload={"purpose":"scan.websocket","scan_id":scan_id,"workspace_id":principal.workspace_id,"user_id":principal.user_id,"actor":principal.actor,"role":principal.role,"exp":exp,"nonce":nonce}
+    client=Redis.from_url(os.getenv("PHANTOM_REDIS_URL","redis://localhost:6379/0"),decode_responses=True)
+    try:await client.set(f"phantom:ws-ticket:{nonce}","1",ex=WS_TICKET_TTL_SECONDS,nx=True)
+    finally:await client.aclose()
+    return _ws_encode(payload)
+async def consume_ws_ticket(token:str,expected_scan_id:str)->Principal:
+    payload=_ws_decode(token);now=int(datetime.now(timezone.utc).timestamp())
+    try:expires=int(payload.get("exp",0))
+    except (ValueError,TypeError):expires=0
+    if payload.get("purpose")!="scan.websocket" or payload.get("scan_id")!=expected_scan_id or expires<now or not payload.get("nonce"):raise HTTPException(401,"WebSocket ticket expired or out of scope")
+    client=Redis.from_url(os.getenv("PHANTOM_REDIS_URL","redis://localhost:6379/0"),decode_responses=True)
+    try:consumed=await client.getdel(f"phantom:ws-ticket:{payload['nonce']}")
+    finally:await client.aclose()
+    if consumed!="1":raise HTTPException(401,"WebSocket ticket already used or invalid")
+    return Principal(str(payload.get("actor","")),str(payload.get("role","")),str(payload.get("workspace_id","")),payload.get("user_id"))
