@@ -20,7 +20,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile Python sources
-        run: python -m compileall backend/app
+        run: python -m compileall backend/app backend/alembic
+      - name: Validate Alembic revisions
+        run: |
+          cd backend
+          alembic history
+          alembic heads
       - name: Run backend unit tests
         run: |
           cd backend
