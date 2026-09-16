@@ -1,72 +1,30 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  Activity, Server, Crosshair, ShieldAlert,
-  FileText, Settings, Users,
-  Search, TerminalSquare, Network, FlaskConical, Radar
-} from 'lucide-react';
+import { Activity, Server, Crosshair, ShieldAlert, FileText, Settings, Users, Search, TerminalSquare, Network, FlaskConical, Radar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
 const NAV_ITEMS = [
-  { icon: Activity, label: 'Overview', path: '/dashboard' },
-  { icon: Server, label: 'Assets', path: '/assets' },
-  { icon: Network, label: 'Topology', path: '/topology' },
-  { icon: Crosshair, label: 'Scans', path: '/scans' },
-  { icon: ShieldAlert, label: 'Vulnerabilities', path: '/vulnerabilities' },
-  { icon: FlaskConical, label: 'Investigation', path: '/investigation' },
-  { icon: Radar, label: 'OSINT', path: '/osint' },
-  { icon: FileText, label: 'Reports', path: '/reports' },
+  { icon: Activity, label: 'Overview', path: '/dashboard' }, { icon: Server, label: 'Assets', path: '/assets' },
+  { icon: Network, label: 'Topology', path: '/topology' }, { icon: Crosshair, label: 'Scans', path: '/scans' },
+  { icon: ShieldAlert, label: 'Vulnerabilities', path: '/vulnerabilities' }, { icon: FlaskConical, label: 'Investigation', path: '/investigation' },
+  { icon: Radar, label: 'OSINT', path: '/osint' }, { icon: FileText, label: 'Reports', path: '/reports' },
 ];
-
-const BOTTOM_NAV_ITEMS = [
-  { icon: TerminalSquare, label: 'Terminal', path: '/terminal' },
-  { icon: Users, label: 'Team', path: '/team' },
-  { icon: Settings, label: 'Settings', path: '/settings' },
-];
+const BOTTOM_NAV_ITEMS = [{ icon: TerminalSquare, label: 'Terminal', path: '/terminal' }, { icon: Users, label: 'Team', path: '/team' }, { icon: Settings, label: 'Settings', path: '/settings' }];
 
 export function NavigationRail() {
-  return (
-    <nav className="w-[68px] h-full flex flex-col items-center py-4 bg-phantom-bg border-r border-transparent flex-shrink-0 z-10">
-      <div className="w-10 h-10 mb-8 rounded-lg bg-phantom-panel flex items-center justify-center border border-phantom-border shadow-sm cursor-pointer group">
-        <div className="w-5 h-5 relative flex items-center justify-center">
-          <div className="absolute inset-x-0 h-0.5 bg-phantom-text-primary rounded-full group-hover:bg-phantom-cyan transition-colors" />
-          <div className="absolute inset-y-0 w-0.5 bg-phantom-text-primary rounded-full group-hover:bg-phantom-cyan transition-colors" />
-          <div className="absolute w-3 h-3 border-2 border-phantom-text-primary rounded-sm rotate-45 group-hover:border-phantom-cyan transition-colors" />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 w-full items-center mb-6">
-        <button className="w-10 h-10 rounded-xl flex items-center justify-center text-phantom-text-tertiary hover:text-phantom-text-primary hover:bg-phantom-surface transition-all duration-200" title="Search">
-          <Search size={20} strokeWidth={2} />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-2 w-full items-center flex-1">
-        {NAV_ITEMS.map((item) => <NavItem key={item.path} item={item} />)}
-      </div>
-
-      <div className="flex flex-col gap-2 w-full items-center mt-auto pt-4">
-        {BOTTOM_NAV_ITEMS.map((item) => <NavItem key={item.path} item={item} />)}
-        <div className="w-10 h-10 mt-2 rounded-full overflow-hidden border border-phantom-border cursor-pointer relative group">
-          <div className="w-full h-full bg-phantom-panel flex items-center justify-center text-xs font-mono text-phantom-text-secondary">P</div>
-          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-phantom-cyan border-2 border-phantom-bg rounded-full" />
-        </div>
-      </div>
-    </nav>
-  );
+  return <nav className="w-[68px] h-full flex flex-col items-center py-4 bg-phantom-bg flex-shrink-0 z-10">
+    <div className="w-10 h-10 mb-8 rounded-lg bg-phantom-panel flex items-center justify-center border border-phantom-border shadow-sm cursor-pointer group">
+      <div className="w-5 h-5 relative flex items-center justify-center"><div className="absolute inset-x-0 h-0.5 bg-phantom-text-primary rounded-full group-hover:bg-phantom-cyan transition-colors" /><div className="absolute inset-y-0 w-0.5 bg-phantom-text-primary rounded-full group-hover:bg-phantom-cyan transition-colors" /><div className="absolute w-3 h-3 border-2 border-phantom-text-primary rounded-sm rotate-45 group-hover:border-phantom-cyan transition-colors" /></div>
+    </div>
+    <div className="flex flex-col gap-3 w-full items-center mb-6"><button className="w-10 h-10 rounded-xl flex items-center justify-center text-phantom-text-tertiary hover:text-phantom-text-primary hover:bg-phantom-surface transition-all duration-200" title="Search"><Search size={20} strokeWidth={2} /></button></div>
+    <div className="flex flex-col gap-2 w-full items-center flex-1">{NAV_ITEMS.map((item) => <NavItem key={item.path} item={item} />)}</div>
+    <div className="flex flex-col gap-2 w-full items-center mt-auto pt-4">{BOTTOM_NAV_ITEMS.map((item) => <NavItem key={item.path} item={item} />)}<div className="w-10 h-10 mt-2 rounded-full overflow-hidden border border-phantom-border cursor-pointer relative group"><div className="w-full h-full bg-phantom-panel flex items-center justify-center text-xs font-mono text-phantom-text-secondary">P</div><div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-phantom-cyan border-2 border-phantom-bg rounded-full" /></div></div>
+  </nav>;
 }
 
-function NavItem({ item }: { item: any }) {
-  return (
-    <NavLink to={item.path} className={({ isActive }) => cn(
-      "relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group",
-      isActive ? "text-phantom-cyan bg-phantom-cyan/10" : "text-phantom-text-secondary hover:text-phantom-text-primary hover:bg-phantom-surface"
-    )} title={item.label}>
-      {({ isActive }) => <>
-        <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-        {isActive && <motion.div layoutId="nav-indicator" className="absolute -left-3 w-1 h-5 bg-phantom-cyan rounded-r-full" initial={false} transition={{ type: 'spring', stiffness: 300, damping: 30 }} />}
-      </>}
-    </NavLink>
-  );
+function NavItem({ item }: { item: any; key?: React.Key }) {
+  return <NavLink to={item.path} className={({ isActive }) => cn('relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 group', isActive ? 'text-phantom-cyan bg-phantom-cyan/10' : 'text-phantom-text-secondary hover:text-phantom-text-primary hover:bg-phantom-surface')} title={item.label}>
+    {({ isActive }) => <><item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />{isActive && <motion.div layoutId="nav-indicator" className="absolute -left-3 w-1 h-5 bg-phantom-cyan rounded-r-full" initial={false} transition={{ type: 'spring', stiffness: 300, damping: 30 }} />}</>}
+  </NavLink>;
 }
