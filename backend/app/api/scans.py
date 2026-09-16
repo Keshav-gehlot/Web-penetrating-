@@ -34,7 +34,7 @@ async def execute_scan(scan_id, expected_worker=None):
       now=datetime.now(timezone.utc);state.status="cancelled";state.cancelled_at=now;state.completed_at=now;state.error="Cancelled by authorized user";state.worker_id=None;state.lease_expires_at=None;await db.commit()
      await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return False
     await bus.publish(scan_id,{"event":"module.started","scan_id":scan_id,"module":module_name,"index":index,"total":total})
-    result=await run_module(module_name,scan.target);seen=set()
+    result=await run_module(module_name,scan.target,runtime_id=scan_id);seen=set()
     for item in result.get("findings",[]):
      state=await db.get(Scan,scan_id)
      if not state or state.status=="cancelled" or state.cancel_requested_at is not None or (expected_worker and state.worker_id!=expected_worker):
