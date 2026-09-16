@@ -6,10 +6,12 @@ import logging
 import os
 import socket
 import time
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
 from .api.scans import execute_scan
+from .config import settings
 from .database import SessionLocal
 from .models import Scan
 from .queue import PROCESSING_QUEUE, SCAN_QUEUE, enqueue_retry, redis_client
@@ -20,18 +22,21 @@ MAX_ATTEMPTS = int(os.getenv("PHANTOM_MAX_JOB_ATTEMPTS", "3"))
 
 
 async def mark_stale_scans() -> None:
-    cutoff = time.time() - int(os.getenv("PHANTOM_SCAN_LEASE_SECONDS", "900"))
+    cutoff = time.time() - settings.SCAN_TOTAL_TIMEOUT_SECONDS
+    recovered: list[str] = []
     async with SessionLocal() as db:
         rows = await db.scalars(select(Scan).where(Scan.status == "running", Scan.started_at.is_not(None)))
-        changed = 0
         for scan in rows.all():
             if scan.started_at.timestamp() < cutoff:
                 scan.status = "queued"
                 scan.error = "Worker lease expired; scan returned to queue."
-                changed += 1
-        if changed:
+                recovered.append(scan.id)
+        if recovered:
             await db.commit()
-            log.warning("Recovered %s stale scan(s)", changed)
+    for scan_id in recovered:
+        await enqueue_retry(scan_id, 1)
+    if recovered:
+        log.warning("Recovered %s stale scan(s)", len(recovered))
 
 
 async def process_job(client, raw: str) -> None:
@@ -45,39 +50,45 @@ async def process_job(client, raw: str) -> None:
         if not scan:
             log.warning("Ignoring missing scan %s", scan_id)
             return
-        if scan.status == "completed":
+        if scan.status in {"completed", "cancelled"}:
             return
         if scan.status == "running":
             log.warning("Skipping scan %s because another worker owns it", scan_id)
             return
         scan.status = "running"
-        scan.started_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        scan.started_at = datetime.now(timezone.utc)
         scan.error = None
         await db.commit()
 
     try:
-        await execute_scan(scan_id)
+        await asyncio.wait_for(execute_scan(scan_id), timeout=settings.SCAN_TOTAL_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        message = f"Scan exceeded {settings.SCAN_TOTAL_TIMEOUT_SECONDS}s execution budget"
+        log.error("%s: %s", scan_id, message)
+        if attempt < MAX_ATTEMPTS:
+            await enqueue_retry(scan_id, attempt + 1)
+        async with SessionLocal() as db:
+            scan = await db.get(Scan, scan_id)
+            if scan and scan.status == "running":
+                scan.status = "queued" if attempt < MAX_ATTEMPTS else "failed"
+                scan.error = message
+                await db.commit()
+        if attempt >= MAX_ATTEMPTS:
+            await client.publish(f"phantom:scan:events:{scan_id}", json.dumps({"event":"scan.failed","scan_id":scan_id,"error":message}))
     except Exception as exc:
         log.exception("Scan %s failed", scan_id)
         if attempt < MAX_ATTEMPTS:
             await enqueue_retry(scan_id, attempt + 1)
-            async with SessionLocal() as db:
-                scan = await db.get(Scan, scan_id)
-                if scan:
-                    scan.status = "queued"
-                    scan.error = f"Retry scheduled after worker error: {exc}"
-                    await db.commit()
-        else:
-            async with SessionLocal() as db:
-                scan = await db.get(Scan, scan_id)
-                if scan:
-                    scan.status = "failed"
-                    scan.error = f"Worker failed after {MAX_ATTEMPTS} attempts: {exc}"
-                    await db.commit()
+        async with SessionLocal() as db:
+            scan = await db.get(Scan, scan_id)
+            if scan:
+                scan.status = "queued" if attempt < MAX_ATTEMPTS else "failed"
+                scan.error = f"Worker error: {exc}"
+                await db.commit()
 
 
 async def main() -> None:
-    log.info("PHANTOM worker started; queue=%s", SCAN_QUEUE)
+    log.info("PHANTOM worker started; queue=%s max_concurrent=%s", SCAN_QUEUE, settings.MAX_CONCURRENT_SCANS)
     client = redis_client()
     try:
         last_recovery = 0.0
