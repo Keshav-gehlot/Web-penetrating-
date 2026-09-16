@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
+from .audit import record_audit
 from .findings import fingerprint_for
 router=APIRouter(prefix="/api/v1/scans",tags=["scans"])
 class ScanRequest(BaseModel):target:str=Field(min_length=1,max_length=2048);profile:str=Field(default="standard",pattern="^(quick|standard|deep|trust)$")
@@ -49,30 +50,30 @@ async def execute_scan(scan_id, expected_worker=None):
     await db.commit();await bus.publish(scan_id,{"event":"module.completed","scan_id":scan_id,"module":module_name,"index":index,"total":total})
    scan.status="completed";scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.completed","scan_id":scan_id});return True
   except Exception as exc:
-   scan.status="failed";scan.error=str(exc);scan.completed_at=datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return False
+   scan.status="failed";scan.error=str(exc);scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return False
 @router.get("/modules")
 async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()}}
 @router.post("")
-async def create_scan(request:ScanRequest,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
+async def create_scan(request:ScanRequest,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  target=validate_target(request.target);asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
  if not asset:asset=Asset(host=target["host"],target=target["target"],workspace_id=principal.workspace_id);db.add(asset);await db.flush()
- scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,attempt=1);db.add(scan);await db.commit();await db.refresh(scan)
+ scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,attempt=1);db.add(scan);await record_audit(db,request_ctx,"scan.created","scan",scan.id,{"target":scan.target,"profile":scan.profile},principal);await db.commit();await db.refresh(scan)
  await enqueue_scan(scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
 @router.post("/{scan_id}/run")
-async def run_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
+async def run_scan(scan_id:str,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status in {"running","queued"}:raise HTTPException(409,"Scan is already queued or running")
  if scan.status=="cancelled":raise HTTPException(409,"Cancelled scans cannot be restarted")
- scan.status="queued";scan.error=None;scan.worker_id=None;scan.lease_expires_at=None;scan.cancel_requested_at=None;scan.cancelled_at=None;scan.completed_at=None;scan.attempt=1;await db.commit();await enqueue_scan(scan_id);return serialize_scan(scan)
+ scan.status="queued";scan.error=None;scan.worker_id=None;scan.lease_expires_at=None;scan.cancel_requested_at=None;scan.cancelled_at=None;scan.completed_at=None;scan.attempt=1;await record_audit(db,request_ctx,"scan.queued","scan",scan.id,None,principal);await db.commit();await enqueue_scan(scan_id);return serialize_scan(scan)
 @router.post("/{scan_id}/cancel")
-async def cancel_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:cancel")),db:AsyncSession=Depends(get_db)):
+async def cancel_scan(scan_id:str,request_ctx:Request,principal:Principal=Depends(require_permission("scan:cancel")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status in {"completed","failed","cancelled"}:return serialize_scan(scan)
  now=datetime.now(timezone.utc);scan.cancel_requested_at=now
  if scan.status=="queued":scan.status="cancelled";scan.cancelled_at=now;scan.completed_at=now;scan.error="Cancelled by authorized user"
- await db.commit();await bus.publish(scan_id,{"event":"scan.cancel_requested","scan_id":scan_id,"status":scan.status});return serialize_scan(scan)
+ await record_audit(db,request_ctx,"scan.cancel_requested","scan",scan.id,{"status":scan.status},principal);await db.commit();await bus.publish(scan_id,{"event":"scan.cancel_requested","scan_id":scan_id,"status":scan.status});return serialize_scan(scan)
 @router.get("")
 async def list_scans(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
  rows=await db.scalars(select(Scan).where(Scan.workspace_id==principal.workspace_id).order_by(Scan.created_at.desc()).limit(100));return [serialize_scan(s) for s in rows.all()]
