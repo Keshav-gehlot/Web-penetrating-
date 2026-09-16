@@ -15,26 +15,26 @@ from ..scanners.runner import MODULES, PROFILES, run_module
 from .findings import fingerprint_for
 router=APIRouter(prefix="/api/v1/scans",tags=["scans"])
 class ScanRequest(BaseModel):target:str=Field(min_length=1,max_length=2048);profile:str=Field(default="standard",pattern="^(quick|standard|deep|trust)$")
-def serialize_scan(scan):return {"id":scan.id,"target":scan.target,"host":scan.host,"profile":scan.profile,"modules":scan.modules,"status":scan.status,"created_at":scan.created_at.isoformat() if scan.created_at else None,"started_at":scan.started_at.isoformat() if scan.started_at else None,"completed_at":scan.completed_at.isoformat() if scan.completed_at else None,"error":scan.error}
+def serialize_scan(scan):return {"id":scan.id,"target":scan.target,"host":scan.host,"profile":scan.profile,"modules":scan.modules,"status":scan.status,"created_at":scan.created_at.isoformat() if scan.created_at else None,"started_at":scan.started_at.isoformat() if scan.started_at else None,"completed_at":scan.completed_at.isoformat() if scan.completed_at else None,"error":scan.error,"attempt":scan.attempt,"worker_id":scan.worker_id,"lease_expires_at":scan.lease_expires_at.isoformat() if scan.lease_expires_at else None,"cancel_requested_at":scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None,"cancelled_at":scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 def severity_rank(v):return {"info":0,"low":1,"medium":2,"high":3,"critical":4}.get(v.lower(),0)
 def serialize_finding(f):return {"id":f.id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"confidence":f.confidence}
 async def execute_scan(scan_id):
  async with SessionLocal() as db:
   scan=await db.get(Scan,scan_id)
-  if not scan:return
-  scan.status="running";scan.started_at=datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.started","scan_id":scan_id})
+  if not scan:return False
+  scan.status="running";scan.started_at=scan.started_at or datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.started","scan_id":scan_id})
   try:
    total=len(scan.modules)
    for index,module_name in enumerate(scan.modules,1):
     state=await db.get(Scan,scan_id)
     if not state or state.status=="cancelled":
-     await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return
+     await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return False
     await bus.publish(scan_id,{"event":"module.started","scan_id":scan_id,"module":module_name,"index":index,"total":total})
     result=await run_module(module_name,scan.target);seen=set()
     for item in result.get("findings",[]):
      state=await db.get(Scan,scan_id)
      if not state or state.status=="cancelled":
-      await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return
+      await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return False
      fp=fingerprint_for(scan,item)
      if fp in seen:continue
      seen.add(fp);existing=await db.scalar(select(Finding).where(Finding.scan_id==scan.id,Finding.fingerprint==fp))
@@ -42,10 +42,9 @@ async def execute_scan(scan_id):
      finding=Finding(scan_id=scan.id,module=item.get("module",module_name),title=item.get("title","Untitled finding"),severity=item.get("severity","info"),status="open",fingerprint=fp,cve=item.get("cve"),cwe=item.get("cwe"),cvss=item.get("cvss"),description=item.get("description",""),remediation=item.get("remediation",""),evidence=item.get("evidence",{}),confidence=float(item.get("confidence",1.0)))
      db.add(finding);await db.flush();await bus.publish(scan_id,{"event":"finding.created","scan_id":scan_id,"finding":serialize_finding(finding)})
     await db.commit();await bus.publish(scan_id,{"event":"module.completed","scan_id":scan_id,"module":module_name,"index":index,"total":total})
-   scan.status="completed"
+   scan.status="completed";scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.completed","scan_id":scan_id});return True
   except Exception as exc:
-   scan.status="failed";scan.error=str(exc);await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return
-  scan.completed_at=datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.completed","scan_id":scan_id})
+   scan.status="failed";scan.error=str(exc);scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return False
 @router.get("/modules")
 async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()}}
 @router.post("")
@@ -60,13 +59,15 @@ async def run_scan(scan_id:str,principal:Principal=Depends(require_permission("s
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status=="running":raise HTTPException(409,"Scan is already running")
  if scan.status=="cancelled":raise HTTPException(409,"Cancelled scans cannot be restarted")
- scan.status="queued";scan.error=None;await db.commit();await enqueue_scan(scan_id);return serialize_scan(scan)
+ scan.status="queued";scan.error=None;scan.worker_id=None;scan.lease_expires_at=None;scan.attempt=1;await db.commit();await enqueue_scan(scan_id);return serialize_scan(scan)
 @router.post("/{scan_id}/cancel")
 async def cancel_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:cancel")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status in {"completed","failed","cancelled"}:return serialize_scan(scan)
- scan.status="cancelled";scan.completed_at=datetime.now(timezone.utc);scan.error="Cancelled by authorized user";await db.commit();await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return serialize_scan(scan)
+ now=datetime.now(timezone.utc);scan.cancel_requested_at=now
+ if scan.status=="queued":scan.status="cancelled";scan.cancelled_at=now;scan.completed_at=now;scan.error="Cancelled by authorized user"
+ await db.commit();await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id,"status":scan.status});return serialize_scan(scan)
 @router.get("")
 async def list_scans(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
  rows=await db.scalars(select(Scan).where(Scan.workspace_id==principal.workspace_id).order_by(Scan.created_at.desc()).limit(100));return [serialize_scan(s) for s in rows.all()]
