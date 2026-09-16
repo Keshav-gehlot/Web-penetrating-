@@ -8,15 +8,12 @@ from pydantic import BaseModel, Field
 
 from .database import init_db
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     yield
 
-
 app = FastAPI(title="PHANTOM Security API", version="2.0.0", lifespan=lifespan)
-
 
 class TargetRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048)
@@ -72,7 +69,9 @@ async def resolve_host(host: str):
 from .api.scans import router as scans_router
 from .api.reports import router as reports_router
 from .api.events import router as events_router
+from .api.findings import router as findings_router
 
 app.include_router(scans_router)
 app.include_router(reports_router)
 app.include_router(events_router)
+app.include_router(findings_router)
