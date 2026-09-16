@@ -33,6 +33,8 @@ async def run_module(name: str, target: str) -> dict:
             "error": f"Module exceeded {settings.SCAN_MODULE_TIMEOUT_SECONDS}s execution budget",
             "findings": [],
         }
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         return {"module": name, "status": "error", "error": str(exc), "findings": []}
 
