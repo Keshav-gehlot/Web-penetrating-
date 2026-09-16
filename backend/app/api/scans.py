@@ -26,9 +26,15 @@ async def execute_scan(scan_id):
   try:
    total=len(scan.modules)
    for index,module_name in enumerate(scan.modules,1):
+    state=await db.get(Scan,scan_id)
+    if not state or state.status=="cancelled":
+     await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return
     await bus.publish(scan_id,{"event":"module.started","scan_id":scan_id,"module":module_name,"index":index,"total":total})
     result=await run_module(module_name,scan.target);seen=set()
     for item in result.get("findings",[]):
+     state=await db.get(Scan,scan_id)
+     if not state or state.status=="cancelled":
+      await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return
      fp=fingerprint_for(scan,item)
      if fp in seen:continue
      seen.add(fp);existing=await db.scalar(select(Finding).where(Finding.scan_id==scan.id,Finding.fingerprint==fp))
@@ -53,7 +59,14 @@ async def run_scan(scan_id:str,principal:Principal=Depends(require_permission("s
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status=="running":raise HTTPException(409,"Scan is already running")
- await enqueue_scan(scan_id);scan.status="queued";await db.commit();return serialize_scan(scan)
+ if scan.status=="cancelled":raise HTTPException(409,"Cancelled scans cannot be restarted")
+ scan.status="queued";scan.error=None;await db.commit();await enqueue_scan(scan_id);return serialize_scan(scan)
+@router.post("/{scan_id}/cancel")
+async def cancel_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:cancel")),db:AsyncSession=Depends(get_db)):
+ scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
+ if not scan:raise HTTPException(404,"Scan not found")
+ if scan.status in {"completed","failed","cancelled"}:return serialize_scan(scan)
+ scan.status="cancelled";scan.completed_at=datetime.now(timezone.utc);scan.error="Cancelled by authorized user";await db.commit();await bus.publish(scan_id,{"event":"scan.cancelled","scan_id":scan_id});return serialize_scan(scan)
 @router.get("")
 async def list_scans(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
  rows=await db.scalars(select(Scan).where(Scan.workspace_id==principal.workspace_id).order_by(Scan.created_at.desc()).limit(100));return [serialize_scan(s) for s in rows.all()]
