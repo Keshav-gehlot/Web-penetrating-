@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Float, Boolean, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Float, Boolean, UniqueConstraint, func, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -55,6 +55,9 @@ class Scan(Base):
     workspace_id:Mapped[str|None]=mapped_column(ForeignKey("workspaces.id"),nullable=True,index=True)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); started_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); completed_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
     error:Mapped[str|None]=mapped_column(Text,nullable=True); asset_id:Mapped[str|None]=mapped_column(ForeignKey("assets.id"),nullable=True)
+    worker_id:Mapped[str|None]=mapped_column(String(160),nullable=True,index=True); lease_expires_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True,index=True)
+    cancel_requested_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); cancelled_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
+    attempt:Mapped[int]=mapped_column(Integer,nullable=False,default=1)
     asset:Mapped[Asset|None]=relationship(back_populates="scans"); findings:Mapped[list[Finding]]=relationship(back_populates="scan",cascade="all, delete-orphan")
 
 class Finding(Base):
