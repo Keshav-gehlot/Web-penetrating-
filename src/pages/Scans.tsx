@@ -1,82 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Play, Search, Shield, Globe2, Server, Sparkles, Loader2, CheckCircle2, XCircle } from 'lucide-react';
-import { createScan, type Scan } from '../lib/phantomApi';
+import { createScan, getScan, type Scan } from '../lib/phantomApi';
+import { authHeaders } from '../lib/auth';
 import { cn } from '../lib/utils';
-
-const PROFILES = [
-  { id: 'quick' as const, title: 'Quick Assessment', desc: 'Fast baseline checks with bounded discovery.', icon: Sparkles, time: 'Short' },
-  { id: 'standard' as const, title: 'Standard Assessment', desc: 'Discovery, HTTP security, TLS and web checks.', icon: Globe2, time: 'Standard' },
-  { id: 'deep' as const, title: 'Deep Assessment', desc: 'Broader bounded infrastructure and application coverage.', icon: Server, time: 'Extended' },
-  { id: 'trust' as const, title: 'Web Trust Audit', desc: 'Accessibility, privacy signals, consent, authenticity and trust-page checks.', icon: Shield, time: 'Web only' },
+const API_BASE=(import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/,'');
+const PROFILES=[
+ {id:'quick' as const,title:'Quick Assessment',desc:'Fast baseline checks with bounded discovery.',icon:Sparkles,time:'Short'},
+ {id:'standard' as const,title:'Standard Assessment',desc:'Discovery, HTTP security, TLS and web checks.',icon:Globe2,time:'Standard'},
+ {id:'deep' as const,title:'Deep Assessment',desc:'Broader bounded infrastructure and application coverage.',icon:Server,time:'Extended'},
+ {id:'trust' as const,title:'Web Trust Audit',desc:'Accessibility, privacy signals, consent, authenticity and trust-page checks.',icon:Shield,time:'Web only'},
 ];
-
-type Profile = typeof PROFILES[number]['id'];
-
-export default function Scans() {
-  const navigate = useNavigate();
-  const [target, setTarget] = useState('');
-  const [profile, setProfile] = useState<Profile>('standard');
-  const [launching, setLaunching] = useState(false);
-  const [error, setError] = useState('');
-  const [recent, setRecent] = useState<Scan[]>([]);
-
-  useEffect(() => {
-    fetch(`${(import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')}/api/v1/scans`)
-      .then((r) => r.ok ? r.json() : [])
-      .then(setRecent)
-      .catch(() => setRecent([]));
-  }, []);
-
-  async function launch() {
-    if (!target.trim()) { setError('Enter an authorized hostname or URL.'); return; }
-    setLaunching(true); setError('');
-    try {
-      const scan = await createScan(target.trim(), profile);
-      navigate(`/scans/live?id=${encodeURIComponent(scan.id)}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to create scan');
-      setLaunching(false);
-    }
-  }
-
-  return (
-    <div className="min-h-full bg-phantom-bg p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-end justify-between mb-7">
-          <div><div className="text-xs font-mono uppercase tracking-widest text-phantom-cyan mb-2">Assessment control</div><h1 className="text-2xl font-semibold tracking-tight">Scan Execution</h1><p className="text-sm text-phantom-text-secondary mt-2">Create a bounded assessment and follow its live execution stream.</p></div>
-          <div className="hidden md:flex items-center gap-2 text-xs text-phantom-text-tertiary font-mono"><span className="w-2 h-2 rounded-full bg-phantom-cyan"/> API connected on launch</div>
-        </div>
-
-        <section className="border border-phantom-border bg-phantom-surface rounded-xl p-5 mb-7">
-          <div className="flex items-center gap-2 text-sm font-medium mb-4"><Shield size={16} className="text-phantom-cyan"/> New assessment</div>
-          <div className="flex flex-col lg:flex-row gap-3">
-            <input value={target} onChange={(e) => setTarget(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && launch()} placeholder="https://example.com" className="flex-1 h-11 px-3 rounded-lg border border-phantom-border bg-phantom-bg text-sm outline-none focus:border-phantom-cyan" />
-            <button onClick={launch} disabled={launching} className="h-11 px-5 rounded-lg bg-phantom-text-primary text-black text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">{launching ? <Loader2 size={16} className="animate-spin"/> : <Play size={15} className="fill-black"/>} {launching ? 'Creating…' : 'Launch Scan'}</button>
-          </div>
-          {error && <div className="mt-3 text-xs text-phantom-coral border border-phantom-coral/20 bg-phantom-coral/5 rounded-md px-3 py-2">{error}</div>}
-          <p className="text-[11px] text-phantom-text-tertiary mt-3">Only assess systems you own or have explicit authorization to test. Private and local targets are rejected by the API.</p>
-        </section>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">
-          {PROFILES.map(({ id, title, desc, icon: Icon, time }) => <button key={id} onClick={() => setProfile(id)} className={cn('text-left border rounded-xl p-4 transition-colors', profile === id ? 'border-phantom-cyan bg-phantom-cyan/5' : 'border-phantom-border bg-phantom-surface hover:border-phantom-border-strong')}>
-            <div className="flex items-center justify-between mb-3"><div className="w-9 h-9 rounded-lg border border-phantom-border bg-phantom-bg flex items-center justify-center"><Icon size={17} className={profile === id ? 'text-phantom-cyan' : 'text-phantom-text-secondary'}/></div><span className="text-[10px] font-mono uppercase text-phantom-text-tertiary">{time}</span></div>
-            <h3 className="text-sm font-medium">{title}</h3><p className="text-xs text-phantom-text-secondary leading-relaxed mt-1.5">{desc}</p>
-            {profile === id && <div className="mt-3 text-[10px] uppercase tracking-wider text-phantom-cyan flex items-center gap-1"><CheckCircle2 size={12}/> Selected</div>}
-          </button>)}
-        </div>
-
-        <section>
-          <div className="flex items-center justify-between mb-3"><h2 className="text-sm font-semibold">Recent scans</h2><div className="text-xs text-phantom-text-tertiary">{recent.length} loaded</div></div>
-          <div className="border border-phantom-border rounded-xl overflow-hidden bg-phantom-surface">
-            {recent.length === 0 ? <div className="p-10 text-center text-sm text-phantom-text-tertiary"><Search size={18} className="mx-auto mb-3 opacity-50"/>No persisted scans yet.</div> : recent.map((scan) => <button key={scan.id} onClick={() => navigate(`/scans/live?id=${encodeURIComponent(scan.id)}`)} className="w-full flex items-center gap-4 px-4 py-3 border-b last:border-b-0 border-phantom-border hover:bg-phantom-panel-hover text-left">
-              <div className="w-8 h-8 rounded-md border border-phantom-border bg-phantom-bg flex items-center justify-center">{scan.status === 'completed' ? <CheckCircle2 size={15} className="text-phantom-cyan"/> : scan.status === 'failed' ? <XCircle size={15} className="text-phantom-coral"/> : <Loader2 size={15} className="animate-spin text-phantom-text-secondary"/>}</div>
-              <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{scan.target}</div><div className="text-[11px] text-phantom-text-tertiary font-mono mt-0.5">{scan.profile} · {scan.id.slice(0, 8)}</div></div>
-              <span className="text-xs capitalize text-phantom-text-secondary">{scan.status}</span>
-            </button>)}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
+type Profile=typeof PROFILES[number]['id'];
+export default function Scans(){
+ const navigate=useNavigate();const[target,setTarget]=useState('');const[profile,setProfile]=useState<Profile>('standard');const[launching,setLaunching]=useState(false);const[error,setError]=useState('');const[recent,setRecent]=useState<Scan[]>([]);
+ const load=()=>fetch(`${API_BASE}/api/v1/scans`,{headers:authHeaders()}).then(r=>r.ok?r.json():[]).then(setRecent).catch(()=>setRecent([]));
+ useEffect(()=>{void load()},[]);
+ async function launch(){if(!target.trim()){setError('Enter an authorized hostname or URL.');return}setLaunching(true);setError('');try{const scan=await createScan(target.trim(),profile);navigate(`/scans/live?id=${encodeURIComponent(scan.id)}`)}catch(e){setError(e instanceof Error?e.message:'Unable to create scan');setLaunching(false)}}
+ return <div className="min-h-full bg-phantom-bg p-6 lg:p-8"><div className="max-w-7xl mx-auto"><div className="flex items-end justify-between mb-7"><div><div className="text-xs font-mono uppercase tracking-widest text-phantom-cyan mb-2">Assessment control</div><h1 className="text-2xl font-semibold tracking-tight">Scan Execution</h1><p className="text-sm text-phantom-text-secondary mt-2">Create a bounded assessment and follow its live execution stream.</p></div></div><section className="border border-phantom-border bg-phantom-surface rounded-xl p-5 mb-7"><div className="flex items-center gap-2 text-sm font-medium mb-4"><Shield size={16} className="text-phantom-cyan"/> New assessment</div><div className="flex flex-col lg:flex-row gap-3"><input value={target} onChange={e=>setTarget(e.target.value)} onKeyDown={e=>e.key==='Enter'&&launch()} placeholder="https://example.com" className="flex-1 h-11 px-3 rounded-lg border border-phantom-border bg-phantom-bg text-sm outline-none focus:border-phantom-cyan"/><button onClick={launch} disabled={launching} className="h-11 px-5 rounded-lg bg-phantom-text-primary text-black text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">{launching?<Loader2 size={16} className="animate-spin"/>:<Play size={15} className="fill-black"/>}{launching?'Creating…':'Launch Scan'}</button></div>{error&&<div className="mt-3 text-xs text-phantom-coral border border-phantom-coral/20 bg-phantom-coral/5 rounded-md px-3 py-2">{error}</div>}<p className="text-[11px] text-phantom-text-tertiary mt-3">Only assess systems you own or have explicit authorization to test. Private and local targets are rejected by the API.</p></section><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">{PROFILES.map(({id,title,desc,icon:Icon,time})=><button key={id} onClick={()=>setProfile(id)} className={cn('text-left border rounded-xl p-4 transition-colors',profile===id?'border-phantom-cyan bg-phantom-cyan/5':'border-phantom-border bg-phantom-surface hover:border-phantom-border-strong')}><div className="flex items-center justify-between mb-3"><div className="w-9 h-9 rounded-lg border border-phantom-border bg-phantom-bg flex items-center justify-center"><Icon size={17} className={profile===id?'text-phantom-cyan':'text-phantom-text-secondary'}/></div><span className="text-[10px] font-mono uppercase text-phantom-text-tertiary">{time}</span></div><h3 className="text-sm font-medium">{title}</h3><p className="text-xs text-phantom-text-secondary leading-relaxed mt-1.5">{desc}</p>{profile===id&&<div className="mt-3 text-[10px] uppercase tracking-wider text-phantom-cyan flex items-center gap-1"><CheckCircle2 size={12}/> Selected</div>}</button>)}</div><section><div className="flex items-center justify-between mb-3"><h2 className="text-sm font-semibold">Recent scans</h2><div className="text-xs text-phantom-text-tertiary">{recent.length} loaded</div></div><div className="border border-phantom-border rounded-xl overflow-hidden bg-phantom-surface">{recent.length===0?<div className="p-10 text-center text-sm text-phantom-text-tertiary"><Search size={18} className="mx-auto mb-3 opacity-50"/>No persisted scans yet.</div>:recent.map(scan=><button key={scan.id} onClick={()=>navigate(`/scans/live?id=${encodeURIComponent(scan.id)}`)} className="w-full flex items-center gap-4 px-4 py-3 border-b last:border-b-0 border-phantom-border hover:bg-phantom-panel-hover text-left"><div className="w-8 h-8 rounded-md border border-phantom-border bg-phantom-bg flex items-center justify-center">{scan.status==='completed'?<CheckCircle2 size={15} className="text-phantom-cyan"/>:scan.status==='failed'?<XCircle size={15} className="text-phantom-coral"/>:<Loader2 size={15} className="animate-spin text-phantom-text-secondary"/>}</div><div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{scan.target}</div><div className="text-[11px] text-phantom-text-tertiary font-mono mt-0.5">{scan.profile} · {scan.id.slice(0,8)}</div></div><span className="text-xs capitalize text-phantom-text-secondary">{scan.status}</span></button>)}</div></section></div></div>
 }
