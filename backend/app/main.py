@@ -20,7 +20,10 @@ def normalize_target(value: str) -> str:
 
 
 def validate_target(value: str) -> dict:
-    normalized = normalize_target(value)
+    try:
+        normalized = normalize_target(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     host = urlparse(normalized).hostname
     try:
         ip = ipaddress.ip_address(host)
@@ -48,3 +51,6 @@ async def resolve_host(host: str):
     except socket.gaierror as exc:
         raise HTTPException(status_code=404, detail=f"DNS resolution failed: {exc}")
     return {"host": host, "addresses": addresses}
+
+from .api.scans import router as scans_router
+app.include_router(scans_router)
