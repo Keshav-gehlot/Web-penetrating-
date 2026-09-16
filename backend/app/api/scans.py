@@ -47,16 +47,13 @@ async def create_scan(request:ScanRequest,principal:Principal=Depends(require_pe
  target=validate_target(request.target);asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
  if not asset:asset=Asset(host=target["host"],target=target["target"],workspace_id=principal.workspace_id);db.add(asset);await db.flush()
  scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id);db.add(scan);await db.commit();await db.refresh(scan)
- await enqueue_scan(scan.id)
- await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id})
- return serialize_scan(scan)
+ await enqueue_scan(scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
 @router.post("/{scan_id}/run")
 async def run_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
  if not scan:raise HTTPException(404,"Scan not found")
  if scan.status=="running":raise HTTPException(409,"Scan is already running")
- await execute_scan(scan_id)
- async with SessionLocal() as session:return serialize_scan(await session.get(Scan,scan_id))
+ await enqueue_scan(scan_id);scan.status="queued";await db.commit();return serialize_scan(scan)
 @router.get("")
 async def list_scans(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
  rows=await db.scalars(select(Scan).where(Scan.workspace_id==principal.workspace_id).order_by(Scan.created_at.desc()).limit(100));return [serialize_scan(s) for s in rows.all()]
