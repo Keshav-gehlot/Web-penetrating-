@@ -10,5 +10,9 @@ class Settings:
     BOOTSTRAP_PASSWORD = os.getenv("PHANTOM_BOOTSTRAP_PASSWORD", "change-me-before-production")
     BOOTSTRAP_ROLE = os.getenv("PHANTOM_BOOTSTRAP_ROLE", "owner")
     SESSION_HOURS = int(os.getenv("PHANTOM_SESSION_HOURS", "12"))
+    SCAN_MODULE_TIMEOUT_SECONDS = int(os.getenv("PHANTOM_SCAN_MODULE_TIMEOUT_SECONDS", "120"))
+    SCAN_TOTAL_TIMEOUT_SECONDS = int(os.getenv("PHANTOM_SCAN_TOTAL_TIMEOUT_SECONDS", "900"))
+    SCAN_MAX_MODULES = int(os.getenv("PHANTOM_SCAN_MAX_MODULES", "32"))
+    MAX_CONCURRENT_SCANS = int(os.getenv("PHANTOM_MAX_CONCURRENT_SCANS", "2"))
 
 settings = Settings()
