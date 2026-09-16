@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,7 @@ from ..auth import Principal
 from ..database import SessionLocal, get_db
 from ..main import validate_target
 from ..models import Asset, Finding, Scan
+from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
@@ -42,10 +43,13 @@ async def execute_scan(scan_id):
 @router.get("/modules")
 async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()}}
 @router.post("")
-async def create_scan(request:ScanRequest,background_tasks:BackgroundTasks,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
+async def create_scan(request:ScanRequest,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  target=validate_target(request.target);asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
  if not asset:asset=Asset(host=target["host"],target=target["target"],workspace_id=principal.workspace_id);db.add(asset);await db.flush()
- scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id);db.add(scan);await db.commit();await db.refresh(scan);background_tasks.add_task(execute_scan,scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
+ scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id);db.add(scan);await db.commit();await db.refresh(scan)
+ await enqueue_scan(scan.id)
+ await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id})
+ return serialize_scan(scan)
 @router.post("/{scan_id}/run")
 async def run_scan(scan_id:str,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
