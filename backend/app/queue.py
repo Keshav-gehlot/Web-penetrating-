@@ -9,6 +9,15 @@ REDIS_URL = os.getenv("PHANTOM_REDIS_URL", "redis://localhost:6379/0")
 SCAN_STREAM = "phantom:scan:jobs"
 SCAN_GROUP = "phantom-workers"
 JOB_LEASE_SECONDS = int(os.getenv("PHANTOM_JOB_LEASE_SECONDS", "900"))
+SLOT_PREFIX = "phantom:scan:slot:"
+MAX_CONCURRENT_SCANS = max(1, int(os.getenv("PHANTOM_MAX_CONCURRENT_SCANS", "2")))
+
+_RELEASE_SLOT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 def redis_client() -> Redis:
@@ -38,3 +47,22 @@ async def enqueue_scan(scan_id: str, attempt: int = 1) -> str:
 
 async def enqueue_retry(scan_id: str, attempt: int) -> str:
     return await enqueue_scan(scan_id, attempt)
+
+
+async def acquire_scan_slot(client: Redis, owner: str) -> str | None:
+    for index in range(MAX_CONCURRENT_SCANS):
+        key = f"{SLOT_PREFIX}{index}"
+        if await client.set(key, owner, nx=True, ex=JOB_LEASE_SECONDS):
+            return key
+    return None
+
+
+async def refresh_scan_slot(client: Redis, slot_key: str, owner: str) -> bool:
+    current = await client.get(slot_key)
+    if current != owner:
+        return False
+    return bool(await client.expire(slot_key, JOB_LEASE_SECONDS))
+
+
+async def release_scan_slot(client: Redis, slot_key: str, owner: str) -> None:
+    await client.eval(_RELEASE_SLOT, 1, slot_key, owner)
