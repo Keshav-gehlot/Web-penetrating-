@@ -14,5 +14,7 @@ class Settings:
     SCAN_TOTAL_TIMEOUT_SECONDS = int(os.getenv("PHANTOM_SCAN_TOTAL_TIMEOUT_SECONDS", "900"))
     SCAN_MAX_MODULES = int(os.getenv("PHANTOM_SCAN_MAX_MODULES", "32"))
     MAX_CONCURRENT_SCANS = int(os.getenv("PHANTOM_MAX_CONCURRENT_SCANS", "2"))
+    SCAN_REQUEST_BUDGET = int(os.getenv("PHANTOM_SCAN_REQUEST_BUDGET", "250"))
+    SCAN_MAX_REDIRECTS = int(os.getenv("PHANTOM_SCAN_MAX_REDIRECTS", "3"))
 
 settings = Settings()
