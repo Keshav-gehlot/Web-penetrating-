@@ -1,6 +1,13 @@
 from __future__ import annotations
+
 import asyncio
 from .modules import MODULES, PROFILES
+from .trust_audit import web_trust_audit
+
+# PHANTOM-owned modules are registered here so specialized modules can evolve
+# independently without turning the central registry into a monolithic file.
+MODULES.setdefault("web_trust_audit", web_trust_audit)
+PROFILES.setdefault("trust", ["web_trust_audit"])
 
 
 def json_safe(value):
@@ -25,5 +32,4 @@ async def run_profile(profile: str, target: str) -> list[dict]:
     names = PROFILES.get(profile)
     if names is None:
         raise ValueError(f"Unknown scan profile: {profile}")
-    results = await asyncio.gather(*(run_module(name, target) for name in names))
-    return list(results)
+    return list(await asyncio.gather(*(run_module(name, target) for name in names)))
