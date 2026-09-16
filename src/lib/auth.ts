@@ -1,4 +1,4 @@
-export type Session = { access_token: string; token_type: string; actor: string; role: string; workspace_id: string };
+export type Session = { access_token: string; token_type: string; actor: string; role: string; workspace_id: string; user_id?: string };
 const KEY = 'phantom.session';
 export function getSession(): Session | null { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; } }
 export function setSession(session: Session) { localStorage.setItem(KEY, JSON.stringify(session)); }
@@ -9,4 +9,4 @@ export async function login(email: string, password: string, workspace_id = 'def
   if (!r.ok) throw new Error((await r.text()) || 'Authentication failed');
   const session = await r.json() as Session; setSession(session); return session;
 }
-export function authHeaders(): Record<string,string> { const s = getSession(); return s ? { Authorization: `Bearer ${s.access_token}`, 'X-PHANTOM-Role': s.role, 'X-PHANTOM-Actor': s.actor } : {}; }
+export function authHeaders(): Record<string,string> { const s = getSession(); return s ? { Authorization: `Bearer ${s.access_token}` } : {}; }
