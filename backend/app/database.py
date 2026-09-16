@@ -25,6 +25,7 @@ async def init_db()->None:
                 "ALTER TABLE findings ADD COLUMN IF NOT EXISTS assignee VARCHAR(255)",
                 "ALTER TABLE findings ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ",
                 "ALTER TABLE findings ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ",
+                "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(36)",
                 "UPDATE findings SET status='open' WHERE status IS NULL",
                 "UPDATE findings SET first_seen=created_at WHERE first_seen IS NULL",
                 "UPDATE findings SET last_seen=created_at WHERE last_seen IS NULL",
