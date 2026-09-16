@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 import ipaddress, socket
 from urllib.parse import urlparse
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .config import settings
 from .database import init_db
+from .auth import Principal
+from .rbac import require_permission
+
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     await init_db();yield
@@ -33,10 +36,16 @@ async def health():return {"status":"ok","service":"phantom-api","version":"2.0.
 @app.post("/api/v1/targets/validate")
 async def target_validate(request:TargetRequest):return validate_target(request.target)
 @app.get("/api/v1/assets/{host}/resolve")
-async def resolve_host(host:str):
-    try:addresses=sorted({item[4][0] for item in socket.getaddrinfo(host,None)})
+async def resolve_host(host:str,principal:Principal=Depends(require_permission("scan:view"))):
+    validation=validate_target(f"https://{host}")
+    try:addresses=sorted({item[4][0] for item in socket.getaddrinfo(validation["host"],None)})
     except socket.gaierror as exc:raise HTTPException(404,f"DNS resolution failed: {exc}")
-    return {"host":host,"addresses":addresses}
+    public=[]
+    for address in addresses:
+        ip=ipaddress.ip_address(address)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:raise HTTPException(400,"Resolved destination is not public")
+        public.append(address)
+    return {"host":validation["host"],"addresses":public}
 from .api.auth import router as auth_router
 from .api.scans import router as scans_router
 from .api.reports import router as reports_router
