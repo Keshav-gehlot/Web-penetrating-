@@ -1,98 +1,14 @@
-import React, { useState } from 'react';
-import { Settings as SettingsIcon, Link2, Shield, Users, Bell, Key, Webhook } from 'lucide-react';
-import { cn } from '../lib/utils';
+import React,{useState}from'react';
+import{Bell,Key,Link2,Settings as SettingsIcon,Shield,Users,Webhook,ArrowRight}from'lucide-react';
+import{useNavigate}from'react-router-dom';
+import{cn}from'../lib/utils';
+import{getSession}from'../lib/auth';
 
-export default function Settings() {
-  const [activeTab, setActiveTab] = useState('integrations');
-
-  return (
-    <div className="flex flex-col h-full bg-phantom-bg">
-      <div className="flex-none p-6 border-b border-phantom-border bg-phantom-surface/50 backdrop-blur-xl z-10 sticky top-0">
-        <h1 className="text-xl font-semibold tracking-tight mb-6">Settings</h1>
-        
-        <div className="flex items-center gap-6">
-          <button onClick={() => setActiveTab('general')} className={cn("text-sm font-medium pb-4 border-b-2 transition-colors", activeTab === 'general' ? "border-phantom-cyan text-phantom-text-primary" : "border-transparent text-phantom-text-tertiary hover:text-phantom-text-secondary")}>General</button>
-          <button onClick={() => setActiveTab('team')} className={cn("text-sm font-medium pb-4 border-b-2 transition-colors", activeTab === 'team' ? "border-phantom-cyan text-phantom-text-primary" : "border-transparent text-phantom-text-tertiary hover:text-phantom-text-secondary")}>Team & Roles</button>
-          <button onClick={() => setActiveTab('integrations')} className={cn("text-sm font-medium pb-4 border-b-2 transition-colors", activeTab === 'integrations' ? "border-phantom-cyan text-phantom-text-primary" : "border-transparent text-phantom-text-tertiary hover:text-phantom-text-secondary")}>Integrations</button>
-          <button onClick={() => setActiveTab('api')} className={cn("text-sm font-medium pb-4 border-b-2 transition-colors", activeTab === 'api' ? "border-phantom-cyan text-phantom-text-primary" : "border-transparent text-phantom-text-tertiary hover:text-phantom-text-secondary")}>API Keys</button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto p-8">
-        {activeTab === 'integrations' && (
-          <div className="max-w-4xl max-w-full">
-            <h2 className="text-lg font-medium text-phantom-text-primary mb-2">Connected Services</h2>
-            <p className="text-sm text-phantom-text-secondary mb-8">Connect Phantom to your existing workflow and alerting tools.</p>
-            
-            <div className="space-y-4">
-              <IntegrationCard 
-                title="Slack" 
-                desc="Send scan completion alerts and critical vulnerability notifications to #security channels." 
-                icon={Webhook} 
-                status="connected" 
-              />
-              <IntegrationCard 
-                title="Jira Software" 
-                desc="Automatically create and assign Jira tickets when high-severity vulnerabilities are found." 
-                icon={Link2} 
-                status="configured" 
-              />
-              <IntegrationCard 
-                title="GitHub" 
-                desc="Scan repositories directly and create PRs for dependency updates." 
-                icon={Key} 
-                status="disconnected" 
-              />
-              <IntegrationCard 
-                title="PagerDuty" 
-                desc="Trigger incidents for severity critical findings immediately." 
-                icon={Bell} 
-                status="disconnected" 
-              />
-            </div>
-          </div>
-        )}
-
-        {activeTab !== 'integrations' && (
-          <div className="max-w-4xl text-phantom-text-secondary text-sm">
-             Configuration options for {activeTab} will appear here.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function IntegrationCard({ title, desc, icon: Icon, status }: any) {
-  return (
-    <div className="p-5 border border-phantom-border rounded-xl bg-phantom-surface flex items-start gap-4 hover:border-phantom-border-strong transition-colors">
-      <div className="w-12 h-12 rounded-lg bg-phantom-panel flex items-center justify-center text-phantom-text-primary shadow-sm border border-phantom-border">
-         <Icon size={24} />
-      </div>
-      <div className="flex-1">
-         <div className="flex items-center justify-between mb-1">
-            <h3 className="font-medium text-phantom-text-primary">{title}</h3>
-            {status === 'connected' ? (
-              <span className="px-2 py-1 bg-phantom-cyan/10 text-phantom-cyan text-xs font-medium rounded border border-phantom-cyan/20">Connected</span>
-            ) : status === 'configured' ? (
-              <span className="px-2 py-1 bg-phantom-amber/10 text-phantom-amber text-xs font-medium rounded border border-phantom-amber/20">Needs Auth</span>
-            ) : (
-              <span className="px-2 py-1 bg-phantom-panel text-phantom-text-tertiary text-xs font-medium rounded border border-phantom-border">Disconnected</span>
-            )}
-         </div>
-         <p className="text-sm text-phantom-text-secondary mb-4">{desc}</p>
-         
-         <div className="flex gap-2">
-            <button className={cn(
-              "px-4 py-1.5 rounded-md text-sm font-medium transition-opacity",
-              status === 'connected' 
-                ? "bg-phantom-panel border border-phantom-border text-phantom-text-secondary hover:text-phantom-text-primary" 
-                : "bg-phantom-text-primary text-black hover:opacity-90"
-            )}>
-              {status === 'connected' ? 'Configure' : 'Connect'}
-            </button>
-         </div>
-      </div>
-    </div>
-  );
-}
+const INTEGRATIONS=[
+ {title:'Slack',desc:'Alert routing is available through the PHANTOM integration API. No connection is configured in this workspace.',icon:Webhook},
+ {title:'Jira Software',desc:'Finding-to-ticket automation can be connected through a workspace-managed integration.',icon:Link2},
+ {title:'GitHub',desc:'Repository integrations are not configured. Connect them only after workspace authorization is established.',icon:Key},
+ {title:'PagerDuty',desc:'Critical-finding incident routing is available as an integration target.',icon:Bell},
+];
+export default function Settings(){const[tab,setTab]=useState('general');const nav=useNavigate();const session=getSession();return <div className="flex flex-col h-full bg-phantom-bg"><header className="flex-none p-6 border-b border-phantom-border bg-phantom-surface/50"><h1 className="text-xl font-semibold tracking-tight mb-6">Settings</h1><div className="flex flex-wrap items-center gap-5">{['general','team','integrations','api'].map(x=><button key={x} onClick={()=>setTab(x)} className={cn('text-sm font-medium pb-3 border-b-2 capitalize',tab===x?'border-phantom-cyan text-phantom-text-primary':'border-transparent text-phantom-text-tertiary')}>{x==='api'?'API & Security':x==='team'?'Team & Roles':' '+x}</button>)}</div></header><main className="flex-1 overflow-auto p-8"><div className="max-w-4xl space-y-5">{tab==='general'&&<section className="rounded-xl border border-phantom-border bg-phantom-surface p-5"><div className="text-xs font-mono uppercase tracking-wider text-phantom-cyan mb-2">Workspace</div><h2 className="text-lg font-medium">PHANTOM Security Workspace</h2><p className="text-sm text-phantom-text-secondary mt-2">Current operator: {session?.actor??'—'} · role: {session?.role??'—'}</p><div className="mt-5 grid sm:grid-cols-2 gap-3"><Info label="Workspace ID" value={session?.workspace_id??'—'}/><Info label="Session" value="Bearer session · server enforced"/></div></section>}{tab==='team'&&<section className="rounded-xl border border-phantom-border bg-phantom-surface p-5"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg border border-phantom-border bg-phantom-bg flex items-center justify-center"><Users size={18}/></div><div className="flex-1"><h2 className="font-medium">Team & roles</h2><p className="text-sm text-phantom-text-secondary mt-1">Membership and permissions are managed from the workspace team console.</p></div><button onClick={()=>nav('/team')} className="h-9 px-3 rounded-lg border border-phantom-border text-xs flex items-center gap-2">Open team <ArrowRight size={13}/></button></div></section>}{tab==='integrations'&&<><div><h2 className="text-lg font-medium">Connected Services</h2><p className="text-sm text-phantom-text-secondary mt-1">Workspace integrations are shown only when backed by persisted configuration.</p></div><div className="space-y-3">{INTEGRATIONS.map(({title,desc,icon:Icon})=><div key={title} className="p-5 border border-phantom-border rounded-xl bg-phantom-surface flex items-start gap-4"><div className="w-11 h-11 rounded-lg bg-phantom-panel flex items-center justify-center border border-phantom-border"><Icon size={20}/></div><div className="flex-1"><div className="flex items-center justify-between gap-3"><h3 className="font-medium">{title}</h3><span className="px-2 py-1 rounded border border-phantom-border bg-phantom-bg text-[10px] uppercase tracking-wider text-phantom-text-tertiary">Not configured</span></div><p className="text-sm text-phantom-text-secondary mt-1.5">{desc}</p></div></div>)}</div></>}{tab==='api'&&<section className="rounded-xl border border-phantom-border bg-phantom-surface p-5"><div className="flex items-center gap-3 mb-4"><Shield size={18} className="text-phantom-cyan"/><div><h2 className="font-medium">API & security</h2><p className="text-sm text-phantom-text-secondary mt-1">Sessions, RBAC and scanner controls are enforced by the backend.</p></div></div><div className="space-y-3"><Info label="Authentication" value="Signed bearer session"/><Info label="Realtime" value="One-time short-lived WebSocket tickets"/><Info label="Scan execution" value="Redis Streams + leased native workers"/></div></section>}</div></main></div>}
+function Info({label,value}:{label:string;value:string}){return <div className="rounded-lg border border-phantom-border bg-phantom-bg p-3"><div className="text-[10px] uppercase tracking-wider text-phantom-text-tertiary">{label}</div><div className="mt-1 text-xs font-mono break-all">{value}</div></div>}
