@@ -34,21 +34,21 @@ async def record_operational_event(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Best-effort operational telemetry; telemetry failures must not break security workflows."""
-    safe_severity = severity.lower() if severity.lower() in _ALLOWED_SEVERITIES else "info"
+    normalized_severity = str(severity).lower()
+    safe_severity = normalized_severity if normalized_severity in _ALLOWED_SEVERITIES else "info"
     try:
         async with SessionLocal() as db:
             db.add(
                 OperationalEvent(
                     id=str(uuid4()),
-                    event_type=event_type[:64],
-                    message=message[:_MAX_MESSAGE_LENGTH],
+                    event_type=str(event_type)[:64],
+                    message=str(message)[:_MAX_MESSAGE_LENGTH],
                     severity=safe_severity,
                     workspace_id=workspace_id,
                     scan_id=scan_id,
-                    metadata=_sanitize_metadata(metadata),
+                    db_metadata=_sanitize_metadata(metadata),
                 )
             )
             await db.commit()
     except Exception:
-        # Operational telemetry is secondary to the scan/authentication path.
         return
