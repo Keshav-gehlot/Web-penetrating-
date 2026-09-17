@@ -9,9 +9,10 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from .database import SessionLocal
-from .models import Asset, Scan, Schedule
+from .models import Asset, Scan, Schedule, WorkspaceScope
 from .queue import enqueue_scan
 from .scanners.runner import PROFILES
+from .security_scope import ScopeViolation, scope_snapshot, validate_target, validate_target_against_scope
 
 log = logging.getLogger("phantom.scheduler")
 INTERVAL = max(5, int(os.getenv("PHANTOM_SCHEDULER_INTERVAL", "15")))
@@ -30,13 +31,25 @@ async def dispatch_due() -> int:
         )
         due = rows.all()
         for schedule in due:
-            target = schedule.target
-            host = target.split("://", 1)[-1].split("/", 1)[0].lower().rstrip(".")
+            scope_row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == schedule.workspace_id))
+            scope = scope_snapshot(scope_row)
+            try:
+                target = validate_target(schedule.target)
+                validate_target_against_scope(target["target"], scope)
+            except (ScopeViolation, ValueError, Exception) as exc:
+                # Do not enqueue a scheduled scan outside the current workspace policy.
+                # Advance the schedule so one invalid entry cannot hot-loop every cycle.
+                schedule.last_run_at = now
+                schedule.next_run_at = now + timedelta(seconds=schedule.interval_seconds)
+                log.warning("Skipped scheduled scan id=%s workspace=%s: %s", schedule.id, schedule.workspace_id, exc)
+                continue
+
+            host = target["host"]
             asset = await db.scalar(select(Asset).where(Asset.workspace_id == schedule.workspace_id, Asset.host == host))
             if not asset:
-                asset = Asset(id=str(uuid4()), host=host, target=target, workspace_id=schedule.workspace_id)
+                asset = Asset(id=str(uuid4()), host=host, target=target["target"], workspace_id=schedule.workspace_id)
                 db.add(asset); await db.flush()
-            scan = Scan(id=str(uuid4()), target=target, host=host, profile=schedule.profile,
+            scan = Scan(id=str(uuid4()), target=target["target"], host=host, profile=schedule.profile,
                         modules=list(PROFILES[schedule.profile]), status="queued", asset_id=asset.id,
                         workspace_id=schedule.workspace_id, attempt=1)
             db.add(scan)
