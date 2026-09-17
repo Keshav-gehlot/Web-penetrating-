@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from .database import SessionLocal
@@ -36,12 +37,13 @@ async def dispatch_due() -> int:
             try:
                 target = validate_target(schedule.target)
                 validate_target_against_scope(target["target"], scope)
-            except (ScopeViolation, ValueError, Exception) as exc:
+            except (ScopeViolation, ValueError, HTTPException) as exc:
                 # Do not enqueue a scheduled scan outside the current workspace policy.
                 # Advance the schedule so one invalid entry cannot hot-loop every cycle.
                 schedule.last_run_at = now
                 schedule.next_run_at = now + timedelta(seconds=schedule.interval_seconds)
-                log.warning("Skipped scheduled scan id=%s workspace=%s: %s", schedule.id, schedule.workspace_id, exc)
+                detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                log.warning("Skipped scheduled scan id=%s workspace=%s: %s", schedule.id, schedule.workspace_id, detail)
                 continue
 
             host = target["host"]
