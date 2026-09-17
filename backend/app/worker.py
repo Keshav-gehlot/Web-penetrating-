@@ -13,10 +13,11 @@ from sqlalchemy import select, update
 from .api.scans import execute_scan
 from .config import settings
 from .database import SessionLocal
-from .models import Scan
+from .models import Scan, WorkspaceScope
 from .observability import record_operational_event
 from .queue import JOB_LEASE_SECONDS, SCAN_GROUP, SCAN_STREAM, ensure_consumer_group, enqueue_retry, redis_client
 from .scan_guard import acquire_slot, refresh_slot, release_slot
+from .security_scope import scope_snapshot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("phantom.worker")
@@ -88,6 +89,7 @@ async def recover_stale_scans() -> int:
             scan.error = "Worker lease expired; scan returned to queue."
             scan.attempt = next_attempt
             recovered.append((scan.id, next_attempt, scan.workspace_id))
+            del old_worker
         await db.commit()
     for scan_id, attempt, workspace_id in recovered:
         try:
@@ -120,18 +122,46 @@ async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, mes
     await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
 
 
+async def _scan_execution_limits(scan_id: str) -> tuple[str | None, int]:
+    async with SessionLocal() as db:
+        scan = await db.get(Scan, scan_id)
+        if not scan:
+            return None, settings.MAX_CONCURRENT_SCANS
+        workspace_id = scan.workspace_id
+        if not workspace_id:
+            return None, settings.MAX_CONCURRENT_SCANS
+        scope_row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == workspace_id))
+        scope = scope_snapshot(scope_row)
+        limit = min(int(scope.get("max_concurrency", settings.MAX_CONCURRENT_SCANS)), settings.MAX_CONCURRENT_SCANS)
+        return workspace_id, max(1, limit)
+
+
 async def process_message(client, message_id: str, fields: dict[str, str]) -> None:
     scan_id = str(fields.get("scan_id", "") or "")
     if not scan_id:
         await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
         return
     attempt = normalize_attempt(fields.get("attempt", "1"))
-    slot = None
-    while slot is None:
-        slot = await acquire_slot(client, settings.MAX_CONCURRENT_SCANS, CONSUMER)
-        if slot is None:
+
+    workspace_id, workspace_limit = await _scan_execution_limits(scan_id)
+    if workspace_id is None:
+        await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
+        return
+
+    workspace_slot = None
+    global_slot = None
+    workspace_namespace = f"workspace:{workspace_id}"
+    while workspace_slot is None or global_slot is None:
+        if workspace_slot is None:
+            workspace_slot = await acquire_slot(client, workspace_limit, CONSUMER, namespace=workspace_namespace)
+        if workspace_slot is not None and global_slot is None:
+            global_slot = await acquire_slot(client, settings.MAX_CONCURRENT_SCANS, CONSUMER, namespace="global")
+            if global_slot is None:
+                await release_slot(client, workspace_slot[0], workspace_slot[1])
+                workspace_slot = None
+        if workspace_slot is None or global_slot is None:
             await asyncio.sleep(1)
-    slot_key, slot_token = slot
+
     try:
         if not await claim_scan(scan_id, attempt):
             async with SessionLocal() as db:
@@ -149,9 +179,11 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=interval)
                 except asyncio.TimeoutError:
-                    if not await refresh_lease(scan_id) or not await refresh_slot(client, slot_key, slot_token):
+                    workspace_ok = await refresh_slot(client, workspace_slot[0], workspace_slot[1])
+                    global_ok = await refresh_slot(client, global_slot[0], global_slot[1])
+                    if not await refresh_lease(scan_id) or not workspace_ok or not global_ok:
                         log.error("Lost execution lease for scan %s", scan_id)
-                        await _op("worker.lease_lost", "Worker lost execution lease", scan_id=scan_id, severity="error", metadata={"worker_id": CONSUMER, "attempt": attempt})
+                        await _op("worker.lease_lost", "Worker lost execution lease", workspace_id=workspace_id, scan_id=scan_id, severity="error", metadata={"worker_id": CONSUMER, "attempt": attempt})
                         lease_lost.set()
                         stop.set()
                         return
@@ -194,7 +226,10 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             if not heartbeat_task.done():
                 await heartbeat_task
     finally:
-        await release_slot(client, slot_key, slot_token)
+        if global_slot is not None:
+            await release_slot(client, global_slot[0], global_slot[1])
+        if workspace_slot is not None:
+            await release_slot(client, workspace_slot[0], workspace_slot[1])
 
 
 async def recover_stale_jobs(client) -> None:
