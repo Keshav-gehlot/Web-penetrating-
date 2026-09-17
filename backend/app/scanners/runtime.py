@@ -22,6 +22,10 @@ class ScanRuntime:
 _CURRENT: contextvars.ContextVar[ScanRuntime | None] = contextvars.ContextVar("phantom_scan_runtime", default=None)
 
 
+def current_runtime() -> ScanRuntime | None:
+    return _CURRENT.get()
+
+
 def ensure_runtime(scope_id: str, scope: dict[str, object] | None = None) -> ScanRuntime:
     current = _CURRENT.get()
     if current is None or current.scope_id != scope_id:
