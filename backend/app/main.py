@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-import socket
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .auth import Principal
 from .config import settings
 from .database import init_db
+from .middleware import RequestContextMiddleware
 from .rbac import require_permission
 from .security_scope import resolve_public_host, validate_target
 
@@ -24,9 +24,12 @@ app = FastAPI(
     title=settings.APP_NAME,
     version="2.0.0",
     description="PHANTOM Security Operations API for authorized, bounded security assessments.",
+    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
+    redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -51,13 +54,9 @@ async def target_validate(request: TargetRequest) -> dict[str, object]:
 
 
 @app.get("/api/v1/assets/{host}/resolve")
-async def resolve_host(
-    host: str,
-    principal: Principal = Depends(require_permission("scan:view")),
-) -> dict[str, object]:
+async def resolve_host(host: str, principal: Principal = Depends(require_permission("scan:view"))) -> dict[str, object]:
     del principal
-    addresses = resolve_public_host(host)
-    return {"host": host.rstrip(".").lower(), "addresses": addresses}
+    return {"host": host.rstrip(".").lower(), "addresses": resolve_public_host(host)}
 
 
 from .api.assets import router as assets_router
