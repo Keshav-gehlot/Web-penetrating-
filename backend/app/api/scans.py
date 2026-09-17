@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Principal
 from ..database import SessionLocal, get_db
 from ..models import Asset, Finding, Scan
+from ..observability import record_operational_event
 from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
@@ -26,46 +27,19 @@ class ScanRequest(BaseModel):
 
 
 def serialize_scan(scan: Scan) -> dict:
-    return {
-        "id": scan.id,
-        "target": scan.target,
-        "host": scan.host,
-        "profile": scan.profile,
-        "modules": scan.modules,
-        "status": scan.status,
-        "created_at": scan.created_at.isoformat() if scan.created_at else None,
-        "started_at": scan.started_at.isoformat() if scan.started_at else None,
-        "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
-        "error": scan.error,
-        "attempt": scan.attempt,
-        "worker_id": scan.worker_id,
-        "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None,
-        "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None,
-        "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None,
-    }
+    return {"id": scan.id, "target": scan.target, "host": scan.host, "profile": scan.profile, "modules": scan.modules, "status": scan.status, "created_at": scan.created_at.isoformat() if scan.created_at else None, "started_at": scan.started_at.isoformat() if scan.started_at else None, "completed_at": scan.completed_at.isoformat() if scan.completed_at else None, "error": scan.error, "attempt": scan.attempt, "worker_id": scan.worker_id, "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None, "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None, "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 
 
 def serialize_finding(finding: Finding) -> dict:
-    return {
-        "id": finding.id,
-        "module": finding.module,
-        "title": finding.title,
-        "severity": finding.severity,
-        "status": finding.status,
-        "fingerprint": finding.fingerprint,
-        "cve": finding.cve,
-        "cwe": finding.cwe,
-        "cvss": finding.cvss,
-        "assignee": finding.assignee,
-        "description": finding.description,
-        "remediation": finding.remediation,
-        "evidence": finding.evidence,
-        "confidence": finding.confidence,
-    }
+    return {"id": finding.id, "module": finding.module, "title": finding.title, "severity": finding.severity, "status": finding.status, "fingerprint": finding.fingerprint, "cve": finding.cve, "cwe": finding.cwe, "cvss": finding.cvss, "assignee": finding.assignee, "description": finding.description, "remediation": finding.remediation, "evidence": finding.evidence, "confidence": finding.confidence}
 
 
 def severity_rank(value: str) -> int:
     return {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}.get(value.lower(), 0)
+
+
+async def _op(event_type: str, message: str, *, workspace_id: str | None = None, scan_id: str | None = None, severity: str = "info", metadata: dict | None = None) -> None:
+    await record_operational_event(event_type, message, severity, workspace_id, scan_id, metadata)
 
 
 async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool:
@@ -77,6 +51,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
         scan.status = "running"
         scan.started_at = scan.started_at or datetime.now(timezone.utc)
         await db.commit()
+        await _op("scan.started", "Scan execution started", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"worker_id": expected_worker, "attempt": scan.attempt, "profile": scan.profile})
         await bus.publish(scan_id, {"event": "scan.started", "scan_id": scan_id})
 
         try:
@@ -89,13 +64,16 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     await _finish_cancellation(db, state, scan_id)
                     return False
                 if expected_worker and state.worker_id != expected_worker:
+                    await _op("scan.lease_lost", "Scan worker lease no longer matches", workspace_id=state.workspace_id, scan_id=state.id, severity="warning", metadata={"worker_id": expected_worker})
                     return False
 
+                await _op("module.started", f"Scanner module started: {module_name}", workspace_id=state.workspace_id, scan_id=state.id, metadata={"module": module_name, "index": index, "total": total})
                 await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
                 result = await run_module(module_name, scan.target, runtime_id=scan.id)
                 result_status = str(result.get("status", "ok"))
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
+                    await _op("module.failed", f"Scanner module failed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, severity="error", metadata={"module": module_name, "status": result_status, "error": error})
                     await bus.publish(scan_id, {"event": "module.failed", "scan_id": scan_id, "module": module_name, "index": index, "total": total, "status": result_status, "error": error})
                     raise RuntimeError(f"Module {module_name} {result_status}: {error}")
 
@@ -108,6 +86,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                         await _finish_cancellation(db, state, scan_id)
                         return False
                     if expected_worker and state.worker_id != expected_worker:
+                        await _op("scan.lease_lost", "Scan worker lease no longer matches", workspace_id=state.workspace_id, scan_id=state.id, severity="warning", metadata={"worker_id": expected_worker, "module": module_name})
                         return False
 
                     fingerprint = fingerprint_for(scan, item)
@@ -122,9 +101,11 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=item.get("evidence", {}), confidence=float(item.get("confidence", 1.0)))
                     db.add(finding)
                     await db.flush()
+                    await _op("finding.created", f"Finding created: {finding.title}", workspace_id=scan.workspace_id, scan_id=scan.id, severity=finding.severity, metadata={"finding_id": finding.id, "module": finding.module, "severity": finding.severity})
                     await bus.publish(scan_id, {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(finding)})
 
                 await db.commit()
+                await _op("module.completed", f"Scanner module completed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"module": module_name, "index": index, "total": total, "finding_count": len(seen)})
                 await bus.publish(scan_id, {"event": "module.completed", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
 
             scan.status = "completed"
@@ -132,6 +113,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
             scan.worker_id = None
             scan.lease_expires_at = None
             await db.commit()
+            await _op("scan.completed", "Scan execution completed", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt})
             await bus.publish(scan_id, {"event": "scan.completed", "scan_id": scan_id})
             return True
         except Exception as exc:
@@ -145,6 +127,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
             scan.worker_id = None
             scan.lease_expires_at = None
             await db.commit()
+            await _op("scan.failed", "Scan execution failed", workspace_id=scan.workspace_id, scan_id=scan.id, severity="error", metadata={"error": str(exc), "attempt": scan.attempt})
             await bus.publish(scan_id, {"event": "scan.failed", "scan_id": scan_id, "error": str(exc)})
             return False
 
@@ -158,6 +141,7 @@ async def _finish_cancellation(db: AsyncSession, scan: Scan, scan_id: str) -> No
     scan.worker_id = None
     scan.lease_expires_at = None
     await db.commit()
+    await _op("scan.cancelled", "Scan execution cancelled", workspace_id=scan.workspace_id, scan_id=scan.id, severity="warning")
     await bus.publish(scan_id, {"event": "scan.cancelled", "scan_id": scan_id})
 
 
@@ -181,6 +165,7 @@ async def create_scan(payload: ScanRequest, request: Request, principal: Princip
     await db.commit()
     await db.refresh(scan)
     await enqueue_scan(scan.id)
+    await _op("scan.queued", "Scan queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt})
     await bus.publish(scan.id, {"event": "scan.created", "scan_id": scan.id})
     return serialize_scan(scan)
 
@@ -205,6 +190,7 @@ async def run_scan(scan_id: str, request: Request, principal: Principal = Depend
     await record_audit(db, request, "scan.queued", "scan", scan.id, None, principal)
     await db.commit()
     await enqueue_scan(scan_id)
+    await _op("scan.queued", "Scan re-queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt})
     return serialize_scan(scan)
 
 
@@ -224,6 +210,7 @@ async def cancel_scan(scan_id: str, request: Request, principal: Principal = Dep
         scan.error = "Cancelled by authorized user"
     await record_audit(db, request, "scan.cancel_requested", "scan", scan.id, {"status": scan.status}, principal)
     await db.commit()
+    await _op("scan.cancel_requested", "Scan cancellation requested", workspace_id=scan.workspace_id, scan_id=scan.id, severity="warning", metadata={"status": scan.status})
     await bus.publish(scan_id, {"event": "scan.cancel_requested", "scan_id": scan_id, "status": scan.status})
     return serialize_scan(scan)
 
