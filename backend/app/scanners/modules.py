@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-from .runtime import bounded_connect, bounded_resolve, scoped_tcp_socket
+from .runtime import bounded_connect, bounded_get, bounded_resolve, bounded_snapshot, scoped_tcp_socket
 from ..security_scope import scope_host_allowed
 
 UA = "PHANTOM/2.0 authorized-security-assessment"
@@ -36,14 +36,11 @@ def base(module, **extra):
 
 
 async def get(target: str, path: str = ""):
-    url = urljoin(target.rstrip("/") + "/", path.lstrip("/"))
-    async with httpx.AsyncClient(follow_redirects=False, timeout=TIMEOUT, headers={"User-Agent": UA}) as c:
-        return await c.get(url)
+    return await bounded_get(target, path)
 
 
 async def http_snapshot(target: str):
-    async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT, headers={"User-Agent": UA}) as c:
-        return await c.get(target)
+    return await bounded_snapshot(target)
 
 
 async def port_scanner(target):
@@ -258,54 +255,3 @@ async def tech_detection(target):
     for name,pat in (("WordPress",r"wp-content|wp-includes"),("React",r"__react|reactroot"),("Next.js",r"__next_f|_next/static"),("Django",r"csrfmiddlewaretoken")):
         if re.search(pat,text,re.I): tech.append({"name":name,"confidence":0.7})
     return base("technology_detection", technologies=tech)
-
-
-async def endpoint_inventory(target):
-    r,p=await html_parser(target); links=[]
-    for m in re.finditer(r'href=["\']([^"\']+)',r.text,re.I):
-        href=urljoin(str(r.url),m.group(1)); parsed=urlparse(href)
-        if parsed.netloc==urlparse(target).netloc: links.append(href)
-    return base("endpoint_inventory", endpoints=sorted(set(links))[:500], forms=p.forms)
-
-
-async def http_header_analyzer(target):
-    return await http_snapshot_module(target)
-
-async def http_snapshot_module(target):
-    r=await http_snapshot(target); h={k.lower():v for k,v in r.headers.items()}; findings=[]
-    required={"strict-transport-security":("high","Enable HSTS on HTTPS deployments."),"content-security-policy":("medium","Define a restrictive CSP."),"x-content-type-options":("medium","Set nosniff."),"referrer-policy":("low","Set an explicit Referrer-Policy."),"permissions-policy":("low","Restrict unnecessary browser capabilities.")}
-    for k,(sev,fix) in required.items():
-        if k not in h: findings.append(finding("http_header_analyzer",f"Missing {k}",sev,"Security header was not present.",fix,{"status":r.status_code},0.99))
-    return base("http_header_analyzer", status=r.status_code, final_url=str(r.url), headers=dict(r.headers), findings=findings)
-
-
-async def tls_analyzer(target):
-    p=urlparse(target); host=p.hostname; port=p.port or 443
-    if p.scheme!="https": return base("tls_analyzer", enabled=False, note="Target is not HTTPS")
-    try:
-        ctx=ssl.create_default_context()
-        raw=scoped_tcp_socket(host,port)
-        try:
-            with ctx.wrap_socket(raw,server_hostname=host) as s:
-                cert=s.getpeercert(); cipher=s.cipher(); version=s.version()
-            return base("tls_analyzer", enabled=True, protocol=version, cipher=cipher[0] if cipher else None, certificate={"subject":cert.get("subject"),"issuer":cert.get("issuer"),"not_after":cert.get("notAfter")})
-        except Exception:
-            raw.close()
-            raise
-    except (OSError,ssl.SSLError,RuntimeError) as exc: return base("tls_analyzer", enabled=True, error=str(exc))
-
-
-MODULES={
- "port_scanner":port_scanner,"sql_injection":sqli_detector,"xss_detector":xss_detector,
- "subdomain_enumeration":subdomain_enumeration,"http_headers":http_header_analyzer,"ssl_tls":tls_analyzer,
- "directory_enumeration":directory_enumeration,"waf_detection":waf_detection,"whois_lookup":whois_lookup,
- "dns_recon":dns_recon,"cve_lookup":cve_lookup,"csrf_detector":csrf_detector,"ssrf_detector":ssrf_detector,
- "xxe_detector":xxe_detector,"authentication_tester":auth_tester,"open_redirect":open_redirect_detector,
- "security_txt":security_txt,"robots_sitemap":robots_sitemap,"cookie_audit":cookie_audit,"cors_audit":cors_audit,
- "technology_detection":tech_detection,"endpoint_inventory":endpoint_inventory,"net_watch":port_scanner,
- "http_snapshot":http_snapshot_module,"tls_analyzer":tls_analyzer,
-}
-
-PROFILES={"quick":("dns_recon","http_headers","ssl_tls","security_txt","robots_sitemap","cookie_audit","cors_audit","technology_detection"),
-          "standard":tuple(MODULES.keys()),
-          "deep":tuple(MODULES.keys())}
