@@ -85,10 +85,6 @@ async def recover_stale_scans() -> int:
             recovered.append((scan.id, next_attempt))
         await db.commit()
 
-    # A DB lease can expire after the Redis stream message has already been
-    # acknowledged. Re-enqueue recovered scans so they cannot become stranded.
-    # The attempt is advanced here so stale-worker recovery obeys the same
-    # retry ceiling as ordinary execution failures.
     for scan_id, attempt in recovered:
         try:
             await enqueue_retry(scan_id, attempt)
@@ -175,14 +171,10 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
 
             if heartbeat_task in done and lease_lost.is_set():
                 # The database/Redis lease is no longer owned by this worker.
-                # Stop network work immediately instead of allowing the old
-                # worker to continue alongside the recovered worker.
+                # Stop network work immediately. Do not ACK the stream message:
+                # recovery must reclaim or re-enqueue it for another worker.
                 execution_task.cancel()
-                try:
-                    await execution_task
-                except asyncio.CancelledError:
-                    pass
-                await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
+                await asyncio.gather(execution_task, return_exceptions=True)
                 return
 
             if heartbeat_task in done:
@@ -190,10 +182,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                 # Treat that as an execution-ownership failure rather than
                 # continuing without a live lease.
                 execution_task.cancel()
-                try:
-                    await execution_task
-                except asyncio.CancelledError:
-                    pass
+                await asyncio.gather(execution_task, return_exceptions=True)
                 await retry_or_fail(client, message_id, scan_id, attempt, "Worker heartbeat stopped unexpectedly")
                 return
 
@@ -213,6 +202,9 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             await retry_or_fail(client, message_id, scan_id, attempt, f"Scan exceeded {settings.SCAN_TOTAL_TIMEOUT_SECONDS}s execution budget")
         except Exception as exc:
             log.exception("Scan %s failed", scan_id)
+            if not execution_task.done():
+                execution_task.cancel()
+            await asyncio.gather(execution_task, return_exceptions=True)
             await retry_or_fail(client, message_id, scan_id, attempt, f"Worker error: {exc}")
         finally:
             stop.set()
