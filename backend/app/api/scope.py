@@ -72,6 +72,8 @@ async def put_scope(
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    if payload.enabled and not payload.authorization_acknowledged:
+        raise HTTPException(400, "Authorization acknowledgement is required before enabling the scope")
     if payload.max_requests > settings.SCAN_REQUEST_BUDGET:
         raise HTTPException(400, f"max_requests cannot exceed the server safety budget of {settings.SCAN_REQUEST_BUDGET}")
     if payload.max_concurrency > settings.MAX_CONCURRENT_SCANS:
@@ -134,10 +136,10 @@ async def check_target(
         raise HTTPException(409, "Workspace scope has not been configured")
     try:
         normalized = normalize_target(target)
-        result = validate_target_against_scope(normalized, scope_snapshot(row))
         validate_target(normalized)
+        result = validate_target_against_scope(normalized, scope_snapshot(row))
         return {"allowed": True, **result}
     except ScopeViolation as exc:
         return {"allowed": False, "reason": str(exc)}
     except HTTPException as exc:
-        raise exc
+        return {"allowed": False, "reason": str(exc.detail)}
