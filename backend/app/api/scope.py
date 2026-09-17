@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Principal
 from ..config import settings
 from ..database import get_db
-from ..models import WorkspaceScope
+from ..models import Scan, WorkspaceScope
+from ..observability import record_operational_event
 from ..rbac import require_permission
 from ..security_scope import (
     ScopeViolation,
@@ -37,6 +38,24 @@ class ScopeRequest(BaseModel):
     max_concurrency: int = Field(default=1, ge=1, le=16)
     max_redirects: int = Field(default=3, ge=0, le=5)
     authorization_acknowledged: bool = False
+
+
+def _policy_changed(row: WorkspaceScope | None, normalized: dict, payload: ScopeRequest) -> bool:
+    if row is None:
+        return True
+    return any(
+        (
+            row.enabled != payload.enabled,
+            row.authorized_targets != normalized["authorized_targets"],
+            row.excluded_targets != normalized["excluded_targets"],
+            row.allowed_ports != normalized["allowed_ports"],
+            row.allowed_paths != normalized["allowed_paths"],
+            row.blocked_paths != normalized["blocked_paths"],
+            row.max_requests != payload.max_requests,
+            row.max_concurrency != payload.max_concurrency,
+            row.max_redirects != payload.max_redirects,
+        )
+    )
 
 
 @router.get("")
@@ -82,6 +101,7 @@ async def put_scope(
         raise HTTPException(400, f"max_redirects cannot exceed the server limit of {settings.SCAN_MAX_REDIRECTS}")
 
     row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == principal.workspace_id))
+    policy_changed = _policy_changed(row, normalized, payload)
     now = datetime.now(timezone.utc)
     if row is None:
         row = WorkspaceScope(id=str(uuid4()), workspace_id=principal.workspace_id)
@@ -100,6 +120,24 @@ async def put_scope(
     row.authorization_acknowledged_at = now if payload.authorization_acknowledged else None
     row.acknowledged_by = principal.user_id if payload.authorization_acknowledged else None
 
+    cancelled_ids: list[str] = []
+    if policy_changed and row.id:
+        active = await db.scalars(
+            select(Scan).where(
+                Scan.workspace_id == principal.workspace_id,
+                Scan.status.in_(["queued", "running"]),
+            )
+        )
+        for scan in active.all():
+            scan.cancel_requested_at = now
+            scan.status = "cancelled"
+            scan.cancelled_at = now
+            scan.completed_at = now
+            scan.worker_id = None
+            scan.lease_expires_at = None
+            scan.error = "Cancelled because the workspace scope policy changed. Re-queue after reviewing the new scope."
+            cancelled_ids.append(scan.id)
+
     await record_audit(
         db,
         request,
@@ -108,6 +146,7 @@ async def put_scope(
         row.id,
         {
             "enabled": row.enabled,
+            "policy_changed": policy_changed,
             "authorized_targets": row.authorized_targets,
             "excluded_targets": row.excluded_targets,
             "allowed_ports": row.allowed_ports,
@@ -117,12 +156,25 @@ async def put_scope(
             "max_concurrency": row.max_concurrency,
             "max_redirects": row.max_redirects,
             "authorization_acknowledged": row.authorization_acknowledged,
+            "cancelled_scan_count": len(cancelled_ids),
         },
         principal,
     )
     await db.commit()
     await db.refresh(row)
-    return {**scope_snapshot(row), "configured": True}
+
+    if cancelled_ids:
+        for scan_id in cancelled_ids:
+            await record_operational_event(
+                "scan.scope_changed",
+                "Scan cancelled because workspace scope changed",
+                "warning",
+                principal.workspace_id,
+                scan_id,
+                {"scope_id": row.id},
+            )
+
+    return {**scope_snapshot(row), "configured": True, "cancelled_scan_count": len(cancelled_ids)}
 
 
 @router.post("/check")
