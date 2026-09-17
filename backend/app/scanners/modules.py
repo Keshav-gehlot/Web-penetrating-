@@ -16,6 +16,9 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
+from .runtime import bounded_connect, bounded_resolve, scoped_tcp_socket
+from ..security_scope import scope_host_allowed
+
 UA = "PHANTOM/2.0 authorized-security-assessment"
 TIMEOUT = httpx.Timeout(8.0, connect=5.0)
 COMMON_PORTS = (21, 22, 25, 53, 80, 110, 143, 443, 445, 587, 993, 995, 3306, 5432, 6379, 8080, 8443)
@@ -46,12 +49,16 @@ async def http_snapshot(target: str):
 async def port_scanner(target):
     host = urlparse(target).hostname
     results = []
+    if not host:
+        return base("port_scanner", host=host, ports=[])
     for port in COMMON_PORTS:
         try:
-            with socket.create_connection((host, port), timeout=0.6):
-                results.append({"port": port, "state": "open"})
+            bounded_connect(host, port)
+            results.append({"port": port, "state": "open"})
         except OSError:
             pass
+        except RuntimeError:
+            continue
     return base("port_scanner", host=host, ports=results)
 
 
@@ -64,10 +71,13 @@ async def subdomain_enumeration(target):
     found = []
     for name in names:
         fqdn = f"{name}.{root}"
+        runtime_scope = __import__(".runtime", globals(), locals(), ["_CURRENT"], 1)._CURRENT.get()
+        if runtime_scope is not None and runtime_scope.scope is not None and not scope_host_allowed(fqdn, runtime_scope.scope):
+            continue
         try:
-            addrs = sorted({x[4][0] for x in socket.getaddrinfo(fqdn, None)})
+            addrs = bounded_resolve(fqdn)
             found.append({"host": fqdn, "addresses": addrs})
-        except socket.gaierror:
+        except RuntimeError:
             continue
     return base("subdomain_enumeration", root=root, subdomains=found)
 
@@ -97,25 +107,21 @@ async def waf_detection(target):
 
 async def whois_lookup(target):
     host = urlparse(target).hostname
-    # RDAP is the modern machine-readable WHOIS replacement. We only perform a
-    # direct lookup when the input is an IP; domain registries vary by TLD.
-    try:
-        socket.inet_pton(socket.AF_INET, host)
-        async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": UA}) as c:
-            r = await c.get(f"https://rdap.org/ip/{host}")
-            return base("whois_lookup", host=host, source="rdap", status=r.status_code,
-                        data=r.json() if r.status_code == 200 else {})
-    except (OSError, ValueError, httpx.HTTPError, ValueError):
-        return base("whois_lookup", host=host, source="rdap", data={"note": "Domain RDAP varies by TLD; no registry query was attempted."})
+    return base(
+        "whois_lookup",
+        host=host,
+        source="disabled-external-rdap",
+        data={"note": "External registry lookups are not performed by scanner modules; use an explicitly configured enrichment integration for registry data."},
+    )
 
 
 async def dns_recon(target):
     host = urlparse(target).hostname
     records = []
     try:
-        for item in socket.getaddrinfo(host, None):
-            records.append({"type": "A/AAAA", "value": item[4][0]})
-    except socket.gaierror as exc:
+        for address in bounded_resolve(host):
+            records.append({"type": "A/AAAA", "value": address})
+    except RuntimeError as exc:
         return base("dns_recon", host=host, error=str(exc))
     return base("dns_recon", host=host, records=sorted({tuple(sorted(x.items())) for x in records}))
 
@@ -278,11 +284,15 @@ async def tls_analyzer(target):
     if p.scheme!="https": return base("tls_analyzer", enabled=False, note="Target is not HTTPS")
     try:
         ctx=ssl.create_default_context()
-        with socket.create_connection((host,port),timeout=5) as raw:
+        raw=scoped_tcp_socket(host,port)
+        try:
             with ctx.wrap_socket(raw,server_hostname=host) as s:
                 cert=s.getpeercert(); cipher=s.cipher(); version=s.version()
-        return base("tls_analyzer", enabled=True, protocol=version, cipher=cipher[0] if cipher else None, certificate={"subject":cert.get("subject"),"issuer":cert.get("issuer"),"not_after":cert.get("notAfter")})
-    except (OSError,ssl.SSLError) as exc: return base("tls_analyzer", enabled=True, error=str(exc))
+            return base("tls_analyzer", enabled=True, protocol=version, cipher=cipher[0] if cipher else None, certificate={"subject":cert.get("subject"),"issuer":cert.get("issuer"),"not_after":cert.get("notAfter")})
+        except Exception:
+            raw.close()
+            raise
+    except (OSError,ssl.SSLError,RuntimeError) as exc: return base("tls_analyzer", enabled=True, error=str(exc))
 
 
 MODULES={
