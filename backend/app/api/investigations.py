@@ -1,25 +1,47 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from uuid import uuid4
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from ..api.audit import record_audit
 from ..auth import Principal
 from ..database import get_db
-from ..models import Finding, Scan
+from ..models import Finding, FindingNote, Scan
 from ..rbac import require_permission
+
 router=APIRouter(prefix="/api/v1/investigations",tags=["investigations"])
-class NoteUpdate(BaseModel):note:str=Field(max_length=20000)
+
+class NoteUpdate(BaseModel):
+    note:str=Field(max_length=20000)
+
+def serialize_note(note:FindingNote)->dict:
+    return {"id":note.id,"author_id":note.author_id,"note":note.note,"created_at":note.created_at.isoformat() if note.created_at else None,"updated_at":note.updated_at.isoformat() if note.updated_at else None}
+
 @router.get("/{finding_id}")
 async def investigation(finding_id:str,principal:Principal=Depends(require_permission("finding:view")),db:AsyncSession=Depends(get_db)):
     finding=await db.scalar(select(Finding).join(Scan).where(Finding.id==finding_id,Scan.workspace_id==principal.workspace_id))
     if not finding:raise HTTPException(404,"Finding not found")
     scan=await db.get(Scan,finding.scan_id)
     history_rows=await db.scalars(select(Finding).join(Scan).where(Finding.fingerprint==finding.fingerprint,Scan.workspace_id==principal.workspace_id).order_by(Finding.created_at.desc()).limit(50))
+    note_rows=await db.scalars(select(FindingNote).where(FindingNote.finding_id==finding.id,FindingNote.workspace_id==principal.workspace_id).order_by(FindingNote.updated_at.desc()).limit(50))
     history=[{"id":f.id,"scan_id":f.scan_id,"status":f.status,"severity":f.severity,"first_seen":f.first_seen.isoformat() if f.first_seen else None,"last_seen":f.last_seen.isoformat() if f.last_seen else None} for f in history_rows.all()]
-    return {"finding":{"id":finding.id,"scan_id":finding.scan_id,"module":finding.module,"title":finding.title,"severity":finding.severity,"status":finding.status,"cve":finding.cve,"cwe":finding.cwe,"cvss":finding.cvss,"assignee":finding.assignee,"description":finding.description,"remediation":finding.remediation,"evidence":finding.evidence,"confidence":finding.confidence},"target":{"host":scan.host,"target":scan.target,"profile":scan.profile},"history":history,"timeline":[{"event":"finding_created","at":finding.first_seen.isoformat() if finding.first_seen else None},{"event":"last_observed","at":finding.last_seen.isoformat() if finding.last_seen else None}]}
+    notes=[serialize_note(n) for n in note_rows.all()]
+    return {"finding":{"id":finding.id,"scan_id":finding.scan_id,"module":finding.module,"title":finding.title,"severity":finding.severity,"status":finding.status,"cve":finding.cve,"cwe":finding.cwe,"cvss":finding.cvss,"assignee":finding.assignee,"description":finding.description,"remediation":finding.remediation,"evidence":finding.evidence,"evidence_hash":finding.evidence_hash,"evidence_collected_at":finding.evidence_collected_at.isoformat() if finding.evidence_collected_at else None,"evidence_source":finding.evidence_source,"confidence":finding.confidence},"target":{"host":scan.host,"target":scan.target,"profile":scan.profile},"history":history,"notes":notes,"timeline":[{"event":"finding_created","at":finding.first_seen.isoformat() if finding.first_seen else None},{"event":"last_observed","at":finding.last_seen.isoformat() if finding.last_seen else None}]}
+
 @router.patch("/{finding_id}/notes")
-async def save_note(finding_id:str,payload:NoteUpdate,principal:Principal=Depends(require_permission("finding:edit")),db:AsyncSession=Depends(get_db)):
+async def save_note(finding_id:str,payload:NoteUpdate,request:Request,principal:Principal=Depends(require_permission("finding:edit")),db:AsyncSession=Depends(get_db)):
     finding=await db.scalar(select(Finding).join(Scan).where(Finding.id==finding_id,Scan.workspace_id==principal.workspace_id))
     if not finding:raise HTTPException(404,"Finding not found")
-    evidence=dict(finding.evidence or {});evidence["analyst_note"]=payload.note;evidence["note_updated_at"]=datetime.now(timezone.utc).isoformat();finding.evidence=evidence;await db.commit();return {"finding_id":finding_id,"saved":True,"updated_at":evidence["note_updated_at"]}
+    now=datetime.now(timezone.utc)
+    note=await db.scalar(select(FindingNote).where(FindingNote.finding_id==finding.id,FindingNote.workspace_id==principal.workspace_id,FindingNote.author_id==principal.user_id).order_by(FindingNote.updated_at.desc()).limit(1))
+    if note:
+        note.note=payload.note
+        note.updated_at=now
+    else:
+        note=FindingNote(id=str(uuid4()),finding_id=finding.id,workspace_id=principal.workspace_id,author_id=principal.user_id,note=payload.note,created_at=now,updated_at=now)
+        db.add(note)
+    await record_audit(db,request,"finding.note_updated","finding",finding.id,{"note_id":note.id,"length":len(payload.note)},principal)
+    await db.commit();await db.refresh(note)
+    return {"finding_id":finding_id,"saved":True,"note":serialize_note(note)}
