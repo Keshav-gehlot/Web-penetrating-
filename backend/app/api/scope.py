@@ -13,7 +13,14 @@ from ..config import settings
 from ..database import get_db
 from ..models import WorkspaceScope
 from ..rbac import require_permission
-from ..security_scope import ScopeViolation, scope_snapshot, validate_scope_policy
+from ..security_scope import (
+    ScopeViolation,
+    normalize_target,
+    scope_snapshot,
+    validate_scope_policy,
+    validate_target,
+    validate_target_against_scope,
+)
 from .audit import record_audit
 
 router = APIRouter(prefix="/api/v1/scope", tags=["scope"])
@@ -126,7 +133,6 @@ async def check_target(
     if row is None:
         raise HTTPException(409, "Workspace scope has not been configured")
     try:
-        from ..security_scope import normalize_target, validate_target
         normalized = normalize_target(target)
         result = validate_target_against_scope(normalized, scope_snapshot(row))
         validate_target(normalized)
@@ -135,6 +141,3 @@ async def check_target(
         return {"allowed": False, "reason": str(exc)}
     except HTTPException as exc:
         raise exc
-
-
-from ..security_scope import validate_target_against_scope
