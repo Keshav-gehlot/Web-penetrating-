@@ -20,44 +20,25 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version="2.0.0",
-    description="PHANTOM Security Operations API for authorized, bounded security assessments.",
-    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
-    redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
-    lifespan=lifespan,
-)
-
+app = FastAPI(title=settings.APP_NAME, version="2.0.0", description="PHANTOM Security Operations API for authorized, bounded security assessments.", docs_url="/docs" if settings.ENVIRONMENT != "production" else None, redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None)
 app.add_middleware(RequestContextMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-)
-
+app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-Request-ID"])
 
 class TargetRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048)
-
 
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "phantom-api", "version": "2.0.0"}
 
-
 @app.post("/api/v1/targets/validate")
 async def target_validate(request: TargetRequest) -> dict[str, object]:
     return validate_target(request.target)
-
 
 @app.get("/api/v1/assets/{host}/resolve")
 async def resolve_host(host: str, principal: Principal = Depends(require_permission("scan:view"))) -> dict[str, object]:
     del principal
     return {"host": host.rstrip(".").lower(), "addresses": resolve_public_host(host)}
-
 
 from .api.assets import router as assets_router
 from .api.auth import router as auth_router
@@ -71,24 +52,9 @@ from .api.network import router as network_router
 from .api.network_anomalies import router as network_anomalies_router
 from .api.reports import router as reports_router
 from .api.scans import router as scans_router
+from .api.schedules import router as schedules_router
 from .api.system import router as system_router
 from .api.workspaces import router as workspaces_router
 
-
-for router in (
-    auth_router,
-    assets_router,
-    scans_router,
-    reports_router,
-    events_router,
-    findings_router,
-    investigations_router,
-    audit_router,
-    workspaces_router,
-    dashboard_router,
-    network_router,
-    network_anomalies_router,
-    health_router,
-    system_router,
-):
+for router in (auth_router, assets_router, scans_router, reports_router, events_router, findings_router, investigations_router, audit_router, workspaces_router, dashboard_router, network_router, network_anomalies_router, schedules_router, health_router, system_router):
     app.include_router(router)
