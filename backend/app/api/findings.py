@@ -1,7 +1,6 @@
 from __future__ import annotations
 import hashlib
 import json
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -45,4 +44,4 @@ async def update_finding(finding_id:str,update:FindingUpdate,request:Request,pri
  if update.assignee is not None:
   if principal.role not in {"owner","admin","security_lead","analyst"}:raise HTTPException(403,"Role cannot assign findings")
   changes["assignee"]=[f.assignee,update.assignee.strip() or None];f.assignee=update.assignee.strip() or None
- f.last_seen=datetime.now(timezone.utc);await record_audit(db,request,"finding.updated","finding",f.id,changes,principal);await db.commit();await db.refresh(f);return serialize(f)
+ await record_audit(db,request,"finding.updated","finding",f.id,changes,principal);await db.commit();await db.refresh(f);return serialize(f)
