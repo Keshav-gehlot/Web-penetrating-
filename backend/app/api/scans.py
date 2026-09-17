@@ -96,8 +96,24 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total},
                 )
                 result = await run_module(module_name, scan.target, runtime_id=scan.id)
-                seen: set[str] = set()
+                result_status = str(result.get("status", "ok"))
+                if result_status in {"error", "timeout"}:
+                    error = str(result.get("error") or f"Scanner module {module_name} failed")
+                    await bus.publish(
+                        scan_id,
+                        {
+                            "event": "module.failed",
+                            "scan_id": scan_id,
+                            "module": module_name,
+                            "index": index,
+                            "total": total,
+                            "status": result_status,
+                            "error": error,
+                        },
+                    )
+                    raise RuntimeError(f"Module {module_name} {result_status}: {error}")
 
+                seen: set[str] = set()
                 for item in result.get("findings", []):
                     state = await db.get(Scan, scan_id)
                     if not state:
