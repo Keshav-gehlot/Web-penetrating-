@@ -13,7 +13,7 @@ from .security_scope import resolve_public_host,validate_target
 async def lifespan(app:FastAPI):
  await init_db();yield
 app=FastAPI(title=settings.APP_NAME,version="2.0.0",description="PHANTOM Security Operations API for authorized, bounded security assessments.",docs_url="/docs" if settings.ENVIRONMENT!="production" else None,redoc_url="/redoc" if settings.ENVIRONMENT!="production" else None)
-app.add_middleware(RequestContextMiddleware);app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Request-ID"])
+app.add_middleware(RequestContextMiddleware);app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Request-ID"])
 class TargetRequest(BaseModel): target:str=Field(min_length=1,max_length=2048)
 @app.get("/health")
 async def health()->dict[str,str]: return {"status":"ok","service":"phantom-api","version":"2.0.0"}
@@ -35,6 +35,7 @@ from .api.operations import router as operations_router
 from .api.reports import router as reports_router
 from .api.scans import router as scans_router
 from .api.schedules import router as schedules_router
+from .api.scope import router as scope_router
 from .api.system import router as system_router
 from .api.workspaces import router as workspaces_router
-for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,schedules_router,health_router,system_router,operations_router): app.include_router(router)
+for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,schedules_router,scope_router,health_router,system_router,operations_router): app.include_router(router)
