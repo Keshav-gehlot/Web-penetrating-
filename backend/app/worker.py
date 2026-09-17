@@ -60,7 +60,7 @@ async def refresh_lease(scan_id: str) -> bool:
 
 async def recover_stale_scans() -> int:
     now = datetime.now(timezone.utc)
-    recovered: list[str] = []
+    recovered: list[tuple[str, int]] = []
     async with SessionLocal() as db:
         rows = await db.scalars(
             select(Scan).where(
@@ -70,21 +70,28 @@ async def recover_stale_scans() -> int:
             )
         )
         for scan in rows.all():
+            next_attempt = max(1, int(scan.attempt or 1) + 1)
+            if next_attempt > MAX_ATTEMPTS:
+                scan.status = "failed"
+                scan.error = f"Worker lease expired after {MAX_ATTEMPTS} execution attempts."
+                scan.worker_id = None
+                scan.lease_expires_at = None
+                continue
             scan.status = "queued"
             scan.worker_id = None
             scan.lease_expires_at = None
             scan.error = "Worker lease expired; scan returned to queue."
-            recovered.append(scan.id)
-        if recovered:
-            await db.commit()
+            scan.attempt = next_attempt
+            recovered.append((scan.id, next_attempt))
+        await db.commit()
 
     # A DB lease can expire after the Redis stream message has already been
-    # acknowledged. Re-enqueue every recovered scan so that it cannot become
-    # permanently queued with no pending job. Duplicate messages are safe:
-    # claim_scan() atomically permits only one worker to claim the scan.
-    for scan_id in recovered:
+    # acknowledged. Re-enqueue recovered scans so they cannot become stranded.
+    # The attempt is advanced here so stale-worker recovery obeys the same
+    # retry ceiling as ordinary execution failures.
+    for scan_id, attempt in recovered:
         try:
-            await enqueue_retry(scan_id, 1)
+            await enqueue_retry(scan_id, attempt)
         except Exception:
             log.exception("Failed to re-enqueue recovered scan %s", scan_id)
     return len(recovered)
@@ -100,8 +107,6 @@ async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, mes
         )
         await db.commit()
 
-    # If this worker no longer owns the scan, another worker has recovered it.
-    # Never overwrite the recovered worker's state or enqueue a duplicate retry.
     if result.rowcount != 1:
         await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
         return
@@ -122,6 +127,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
     except (TypeError, ValueError):
         await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
         return
+    attempt = max(1, min(attempt, MAX_ATTEMPTS))
 
     slot = None
     while slot is None:
@@ -134,9 +140,6 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
         if not await claim_scan(scan_id, attempt):
             async with SessionLocal() as db:
                 scan = await db.get(Scan, scan_id)
-                # A queued scan may belong to another valid message; a running
-                # scan is already being processed by another worker. In either
-                # case this duplicate message must not poison the consumer group.
                 terminal_or_active = not scan or scan.status in {"running", "completed", "failed", "cancelled", "queued"}
             if terminal_or_active:
                 await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
