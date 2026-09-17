@@ -14,6 +14,7 @@ from .api.scans import execute_scan
 from .config import settings
 from .database import SessionLocal
 from .models import Scan
+from .observability import record_operational_event
 from .queue import JOB_LEASE_SECONDS, SCAN_GROUP, SCAN_STREAM, ensure_consumer_group, enqueue_retry, redis_client
 from .scan_guard import acquire_slot, refresh_slot, release_slot
 
@@ -41,13 +42,20 @@ def recovery_attempt(current_attempt: object) -> int | None:
     return next_attempt if next_attempt <= MAX_ATTEMPTS else None
 
 
+async def _op(event_type: str, message: str, *, workspace_id: str | None = None, scan_id: str | None = None, severity: str = "info", metadata: dict | None = None) -> None:
+    await record_operational_event(event_type, message, severity, workspace_id, scan_id, metadata)
+
+
 async def claim_scan(scan_id: str, attempt: int) -> bool:
     now = datetime.now(timezone.utc)
     lease = now + timedelta(seconds=JOB_LEASE_SECONDS)
     async with SessionLocal() as db:
         result = await db.execute(update(Scan).where(Scan.id == scan_id, Scan.status == "queued").values(status="running", started_at=now, worker_id=CONSUMER, lease_expires_at=lease, cancel_requested_at=None, cancelled_at=None, error=None, attempt=attempt))
         await db.commit()
-        return result.rowcount == 1
+        claimed = result.rowcount == 1
+    if claimed:
+        await _op("worker.claimed", "Worker claimed scan execution", scan_id=scan_id, severity="info", metadata={"worker_id": CONSUMER, "attempt": attempt})
+    return claimed
 
 
 async def refresh_lease(scan_id: str) -> bool:
@@ -60,7 +68,8 @@ async def refresh_lease(scan_id: str) -> bool:
 
 async def recover_stale_scans() -> int:
     now = datetime.now(timezone.utc)
-    recovered: list[tuple[str, int]] = []
+    recovered: list[tuple[str, int, str | None]] = []
+    failed: list[tuple[str, str | None]] = []
     async with SessionLocal() as db:
         rows = await db.scalars(select(Scan).where(Scan.status == "running", Scan.lease_expires_at.is_not(None), Scan.lease_expires_at < now))
         for scan in rows.all():
@@ -70,25 +79,34 @@ async def recover_stale_scans() -> int:
                 scan.error = f"Worker lease expired after {MAX_ATTEMPTS} execution attempts."
                 scan.worker_id = None
                 scan.lease_expires_at = None
+                failed.append((scan.id, scan.workspace_id))
                 continue
+            old_worker = scan.worker_id
             scan.status = "queued"
             scan.worker_id = None
             scan.lease_expires_at = None
             scan.error = "Worker lease expired; scan returned to queue."
             scan.attempt = next_attempt
-            recovered.append((scan.id, next_attempt))
+            recovered.append((scan.id, next_attempt, scan.workspace_id))
         await db.commit()
-    for scan_id, attempt in recovered:
+    for scan_id, attempt, workspace_id in recovered:
         try:
             await enqueue_retry(scan_id, attempt)
+            await _op("scan.recovered", "Expired worker lease recovered into queue", workspace_id=workspace_id, scan_id=scan_id, severity="warning", metadata={"attempt": attempt})
         except Exception:
             log.exception("Failed to re-enqueue recovered scan %s", scan_id)
+            await _op("scan.recovery_failed", "Recovered scan could not be re-enqueued", workspace_id=workspace_id, scan_id=scan_id, severity="error", metadata={"attempt": attempt})
+    for scan_id, workspace_id in failed:
+        await _op("scan.retry_exhausted", "Scan failed after worker lease attempts were exhausted", workspace_id=workspace_id, scan_id=scan_id, severity="error", metadata={"max_attempts": MAX_ATTEMPTS})
     return len(recovered)
 
 
 async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, message: str) -> None:
     next_status = "queued" if attempt < MAX_ATTEMPTS else "failed"
+    workspace_id = None
     async with SessionLocal() as db:
+        scan = await db.get(Scan, scan_id)
+        workspace_id = scan.workspace_id if scan else None
         result = await db.execute(update(Scan).where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running").values(status=next_status, error=message, worker_id=None, lease_expires_at=None))
         await db.commit()
     if result.rowcount != 1:
@@ -96,6 +114,9 @@ async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, mes
         return
     if attempt < MAX_ATTEMPTS:
         await enqueue_retry(scan_id, attempt + 1)
+        await _op("scan.retry_scheduled", "Scan returned to queue after worker failure", workspace_id=workspace_id, scan_id=scan_id, severity="warning", metadata={"attempt": attempt, "next_attempt": attempt + 1, "error": message})
+    else:
+        await _op("scan.retry_exhausted", "Scan failed after worker retry limit", workspace_id=workspace_id, scan_id=scan_id, severity="error", metadata={"attempt": attempt, "max_attempts": MAX_ATTEMPTS, "error": message})
     await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
 
 
@@ -130,6 +151,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                 except asyncio.TimeoutError:
                     if not await refresh_lease(scan_id) or not await refresh_slot(client, slot_key, slot_token):
                         log.error("Lost execution lease for scan %s", scan_id)
+                        await _op("worker.lease_lost", "Worker lost execution lease", scan_id=scan_id, severity="error", metadata={"worker_id": CONSUMER, "attempt": attempt})
                         lease_lost.set()
                         stop.set()
                         return
@@ -192,6 +214,7 @@ async def main() -> None:
     heartbeat_key = f"phantom:worker:heartbeat:{CONSUMER}"
     last_recovery = 0.0
     log.info("PHANTOM worker started stream=%s group=%s consumer=%s max_concurrent=%s", SCAN_STREAM, SCAN_GROUP, CONSUMER, settings.MAX_CONCURRENT_SCANS)
+    await _op("worker.started", "PHANTOM worker started", metadata={"worker_id": CONSUMER, "max_concurrent": settings.MAX_CONCURRENT_SCANS})
     try:
         while True:
             now = time.time()
@@ -209,6 +232,7 @@ async def main() -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         log.info("PHANTOM worker shutting down")
     finally:
+        await _op("worker.stopped", "PHANTOM worker stopped", severity="warning", metadata={"worker_id": CONSUMER})
         await client.delete(heartbeat_key)
         await client.aclose()
 
