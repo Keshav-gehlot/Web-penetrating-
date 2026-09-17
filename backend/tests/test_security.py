@@ -1,6 +1,6 @@
 from app.auth import Principal, issue_token, principal_from_token
-from app.main import normalize_target
 from app.rbac import PERMISSIONS, Role
+from app.security_scope import normalize_target
 
 
 def test_token_round_trip():
