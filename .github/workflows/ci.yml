@@ -2,9 +2,16 @@ name: PHANTOM CI
 
 on:
   push:
-    branches: [main, phantom-v2]
+    branches: [phantom-v2]
   pull_request:
-    branches: [main, phantom-v2]
+    branches: [phantom-v2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phantom-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
@@ -14,13 +21,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: |
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile Python sources
-        run: python -m compileall backend/app backend/alembic
+        run: python -m compileall -q backend/app backend/alembic backend/tests
       - name: Validate Alembic revisions
         run: |
           cd backend
