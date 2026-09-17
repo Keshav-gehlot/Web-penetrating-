@@ -25,8 +25,6 @@ UNSAFE_PORTS = {
     27017: 2,
 }
 
-PRIVATE_SERVICE_PORTS = {22, 53, 80, 443, 8080, 8443}
-
 
 @dataclass
 class ConnectionMemory:
@@ -64,11 +62,10 @@ class NetworkMonitor:
     def _risk(local: str | None, remote: str | None, port: int | None, status: str) -> tuple[str, int, list[str]]:
         score = 0
         reasons: list[str] = []
-        remote_obj = None
         try:
             remote_obj = ipaddress.ip_address(remote) if remote else None
         except ValueError:
-            pass
+            remote_obj = None
         if port in UNSAFE_PORTS:
             score += UNSAFE_PORTS[port]
             reasons.append(f"sensitive service port {port}")
@@ -91,6 +88,7 @@ class NetworkMonitor:
         now = time.time()
         rows: list[dict[str, Any]] = []
         new_connections: list[dict[str, Any]] = []
+        state_counts: dict[str, int] = {}
         try:
             connections = psutil.net_connections(kind="inet")
         except (psutil.AccessDenied, OSError):
@@ -101,6 +99,7 @@ class NetworkMonitor:
                 status = conn.status or "NONE"
                 if not include_listening and status == psutil.CONN_LISTEN:
                     continue
+                state_counts[status] = state_counts.get(status, 0) + 1
                 local = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else None
                 remote = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None
                 key = f"{local}|{remote}|{status}|{conn.pid or 0}"
@@ -127,11 +126,9 @@ class NetworkMonitor:
                             pass
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
                         pass
-                suspicious_path = False
                 if executable:
                     lowered = executable.lower()
-                    suspicious_path = any(part in lowered for part in ("\\temp\\", "/tmp/", "\\downloads\\", "/downloads/"))
-                    if suspicious_path:
+                    if any(part in lowered for part in ("\\temp\\", "/tmp/", "\\downloads\\", "/downloads/")):
                         risk = "high" if risk in {"info", "low", "medium"} else risk
                         reasons.append("process executable is located in a temporary/download directory")
                 row = {
@@ -165,12 +162,31 @@ class NetworkMonitor:
         previous = self._previous_bytes
         self._previous_bytes = total
         self._previous_time = current
+        addresses = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+        interfaces: dict[str, Any] = {}
+        for name, counter in counters.items():
+            interfaces[name] = {
+                "is_up": bool(stats.get(name).isup) if name in stats else None,
+                "speed_mbps": stats.get(name).speed if name in stats and stats.get(name).speed >= 0 else None,
+                "mtu": stats.get(name).mtu if name in stats else None,
+                "addresses": [
+                    {"family": str(addr.family), "address": addr.address, "netmask": addr.netmask}
+                    for addr in addresses.get(name, [])
+                    if addr.address
+                ],
+                "bytes_sent": counter.bytes_sent,
+                "bytes_recv": counter.bytes_recv,
+                "packets_sent": counter.packets_sent,
+                "packets_recv": counter.packets_recv,
+            }
         return {
             "timestamp": now,
             "hostname": socket.gethostname(),
             "platform": os.name,
             "connection_count": len(rows),
             "new_connection_count": len(new_connections),
+            "connection_states": state_counts,
             "connections": rows,
             "new_connections": new_connections,
             "network_io": {
@@ -180,15 +196,7 @@ class NetworkMonitor:
                 "packets_recv": total.packets_recv,
                 "send_bytes_per_second": max(0, round((total.bytes_sent - previous.bytes_sent) / dt, 2)),
                 "recv_bytes_per_second": max(0, round((total.bytes_recv - previous.bytes_recv) / dt, 2)),
-                "interfaces": {
-                    name: {
-                        "bytes_sent": value.bytes_sent,
-                        "bytes_recv": value.bytes_recv,
-                        "packets_sent": value.packets_sent,
-                        "packets_recv": value.packets_recv,
-                    }
-                    for name, value in counters.items()
-                },
+                "interfaces": interfaces,
             },
             "vpn_interfaces": self._vpn_interfaces(),
         }
