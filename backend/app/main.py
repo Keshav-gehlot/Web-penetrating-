@@ -67,6 +67,7 @@ from .api.events import router as events_router
 from .api.findings import router as findings_router
 from .api.health import router as health_router
 from .api.investigations import router as investigations_router
+from .api.network import router as network_router
 from .api.reports import router as reports_router
 from .api.scans import router as scans_router
 from .api.system import router as system_router
@@ -84,6 +85,7 @@ for router in (
     audit_router,
     workspaces_router,
     dashboard_router,
+    network_router,
     health_router,
     system_router,
 ):
