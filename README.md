@@ -4,63 +4,60 @@ PHANTOM is an enterprise-oriented security assessment and cybersecurity operatio
 
 > **Security boundary:** Use PHANTOM only against systems you own or have explicit authorization to assess. The platform is designed around bounded, non-destructive assessment workflows and does not provide unrestricted exploit automation.
 
-## What PHANTOM provides
-
-- **Workspace isolation** — assets, scans, findings, reports, and team activity are scoped to a workspace.
-- **Authentication and RBAC** — server-side role and permission enforcement.
-- **Asset inventory** — maintain the systems and targets being assessed.
-- **Controlled scanning** — quick, standard, deep, and PHANTOM Trust assessment profiles.
-- **Live scan operations** — real-time module progress, findings, status, and scan events.
-- **Vulnerability management** — severity, CVSS/CWE/CVE metadata, evidence, assignment, remediation, and lifecycle tracking.
-- **Investigation workspace** — correlate findings with evidence, timelines, requests/responses, notes, and remediation context.
-- **Differential analysis** — identify new, resolved, persistent, and regressed findings between scans.
-- **Reports** — generate structured technical and management-facing assessment reports.
-- **Topology and discovery** — represent discovered assets, services, and relationships.
-- **Audit logging** — record security-relevant workspace and administrative actions.
-- **Team management** — workspace members and role administration.
-- **Operational telemetry** — health, readiness, queue, worker, and system status visibility.
-
 ## Architecture
 
 ```text
-                         PHANTOM Operator Console
-                         React + TypeScript + Vite
-                                   │
-                            HTTPS / WebSocket
-                                   │
-                                   ▼
-                         FastAPI Security API
-                                   │
-              ┌────────────────────┼────────────────────┐
-              │                    │                    │
-              ▼                    ▼                    ▼
-        PostgreSQL              Redis              API Services
-          :5432                 :6379              Auth / RBAC
-              │                    │                Assets / Scans
-              │                    ▼                Findings / Reports
-              │             Redis Streams           Audit / Team
-              │                    │
-              │                    ▼
-              │          Native PHANTOM Worker
-              │                    │
-              │          ┌─────────┴─────────┐
-              │          ▼                   ▼
-              │    Discovery Modules   Assessment Modules
-              │          │                   │
-              └──────────┴───────────┬───────┘
-                                     ▼
-                             Result Normalizer
-                                     │
-                                     ▼
-                           Findings + Evidence
-                                     │
-                                     ▼
-                           Reports / Remediation
+React / TypeScript / Vite
+          │
+     HTTPS / WebSocket
+          ▼
+     FastAPI application
+          │
+   ┌──────┼────────┐
+   ▼      ▼        ▼
+PostgreSQL Redis   Security services
+   │      │        Auth / RBAC / Scope
+   │      │        Assets / Findings
+   │      ▼        Reports / Audit
+   │  Redis Streams
+   │      │
+   │      ▼
+   │ Native PHANTOM Worker
+   │      │
+   └──────┼──────────────┐
+          ▼              ▼
+     Scan modules    Result normalization
+          │              │
+          └──────┬───────┘
+                 ▼
+          Findings + Evidence
+                 │
+          Reports / Remediation
 ```
 
-### Runtime
+## Backend
 
-PHANTOM uses a native local/server runtime. **Docker is not required or used.**
+The backend is a native Python service built with FastAPI and asynchronous SQLAlchemy. It is intentionally separated into API, persistence, authentication, authorization, scope validation, scanner runtime, queue, real-time event, and worker layers.
+
+### Backend capabilities
+
+- FastAPI REST API with OpenAPI documentation in development
+- Async SQLAlchemy + PostgreSQL
+- Alembic-managed schema migrations
+- Redis Streams consumer groups for durable scan jobs
+- Native asynchronous scan worker; **Docker is not required or used**
+- Workspace-scoped authorization on server-side queries
+- Signed bearer sessions with server-side membership revalidation
+- One-time, short-lived WebSocket tickets scoped to a scan/workspace
+- Request IDs, security response headers, and structured request logging
+- Liveness and dependency readiness endpoints
+- Worker leases, heartbeats, retry limits, stale-job recovery, and global scan concurrency control
+- Bounded scanner execution with module and total timeouts
+- Per-scan request budgets, redirect limits, response-size limits, and public-target protections
+- Audit events for security-sensitive operations
+- Controlled, non-destructive assessment modules
+
+## Runtime
 
 | Component | Default address |
 |---|---|
@@ -84,37 +81,34 @@ PHANTOM uses a native local/server runtime. **Docker is not required or used.**
 
 ### Backend
 
-- Python
+- Python 3.11+
 - FastAPI
-- SQLAlchemy
+- Pydantic
+- SQLAlchemy 2.x
+- asyncpg
 - PostgreSQL
 - Redis Streams
-- Native asynchronous worker
-- Alembic migrations
-- ReportLab for PDF reports
+- Alembic
+- httpx
+- ReportLab
+- pytest / pytest-asyncio
 
 ## Local development
 
-### 1. Prerequisites
+### Prerequisites
 
 Install:
 
-- Node.js
+- Node.js 22+
 - Python 3.11+
 - PostgreSQL
 - Redis
 
 Create a PostgreSQL database named `phantom` and make sure PostgreSQL and Redis are running locally.
 
-### 2. Configure the backend
+### Configure environment
 
-Copy the example environment file and replace the development secrets before using the platform outside a local development environment.
-
-```bash
-cp .env.example .env
-```
-
-At minimum, configure:
+Copy `.env.example` to `.env` and replace development secrets as appropriate.
 
 ```text
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/phantom
@@ -127,7 +121,7 @@ PHANTOM_BOOTSTRAP_PASSWORD=<strong-development-password>
 
 On Windows, create `.env` manually if `cp` is unavailable.
 
-### 3. Install and migrate the backend
+### Backend setup
 
 ```bash
 cd backend
@@ -146,24 +140,20 @@ Linux/macOS:
 source .venv/bin/activate
 ```
 
-Then:
+Install and migrate:
 
 ```bash
 pip install -r requirements.txt
 alembic upgrade head
 ```
 
-### 4. Start the API
-
-From `backend`:
+Start the API:
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 5. Start the worker
-
-In another terminal:
+Start the worker in a second terminal:
 
 ```bash
 cd backend
@@ -171,9 +161,9 @@ cd backend
 python -m app.worker
 ```
 
-Use the equivalent `source .venv/bin/activate` command on Linux/macOS.
+Use `source .venv/bin/activate` instead on Linux/macOS.
 
-### 6. Start the frontend
+### Frontend setup
 
 From the repository root:
 
@@ -182,34 +172,48 @@ npm install
 npm run dev
 ```
 
-Open the console at:
+Open `http://127.0.0.1:5173`.
+
+## API health
+
+Liveness:
 
 ```text
-http://127.0.0.1:5173
+GET /health
 ```
+
+Dependency readiness:
+
+```text
+GET /ready
+```
+
+`/ready` returns HTTP 503 when PostgreSQL or Redis is unavailable.
+
+Development API documentation is available at `/docs` and `/redoc`. These documentation endpoints are disabled when `PHANTOM_ENV=production`.
 
 ## Database migrations
 
-Alembic is the source of truth for database schema changes.
-
-Apply migrations:
+Alembic is the source of truth for schema changes.
 
 ```bash
 cd backend
 alembic upgrade head
 ```
 
-Create a migration during development when the SQLAlchemy models change:
+Create a migration during development:
 
 ```bash
 alembic revision --autogenerate -m "describe the schema change"
 ```
 
-Review generated migrations before applying them. Production deployments should run migrations explicitly rather than relying on application startup to alter database schemas.
+Always review generated migrations before applying them. Production deployments should run migrations explicitly; application startup does not modify table definitions.
 
 ## Authentication and authorization
 
-PHANTOM uses signed bearer sessions and validates workspace membership on the server. Roles include:
+PHANTOM uses signed bearer sessions. Every authenticated request revalidates the user and workspace membership against PostgreSQL, so a stale client-side role cannot grant access.
+
+Roles:
 
 - `OWNER`
 - `ADMIN`
@@ -218,33 +222,72 @@ PHANTOM uses signed bearer sessions and validates workspace membership on the se
 - `DEVELOPER`
 - `VIEWER`
 
-Security-sensitive operations are protected by explicit permissions such as `scan:create`, `scan:cancel`, `finding:assign`, `finding:close`, `report:export`, `users:manage`, and `integrations:manage`.
+Examples of protected permissions include `scan:create`, `scan:cancel`, `finding:assign`, `finding:close`, `report:export`, `users:manage`, and `audit:view`.
 
-Real-time scan updates use dedicated short-lived WebSocket tickets scoped to the requested scan and workspace.
+Real-time scan connections use a separate short-lived, single-use WebSocket ticket. The ticket is bound to the scan and workspace and the membership is revalidated when the ticket is consumed.
 
 ## Scan execution
 
-Scan jobs are delivered through **Redis Streams consumer groups** to native PHANTOM workers. The execution layer provides:
+Scan jobs use Redis Streams consumer groups and native workers.
 
-- bounded module execution timeouts;
-- bounded total scan duration;
-- per-scan request budgets;
-- redirect limits;
-- response-size limits;
-- controlled concurrency;
+```text
+API
+ │ XADD
+ ▼
+Redis Stream
+ │
+ ▼
+Consumer Group
+ │
+ ▼
+PHANTOM Worker
+ │
+ ├── acquire execution slot
+ ├── claim DB lease
+ ├── execute bounded modules
+ ├── refresh worker lease
+ └── XACK / retry
+```
+
+The worker supports:
+
+- atomic database scan claims;
 - worker execution leases;
-- retry limits;
-- stale-job recovery;
+- worker heartbeats;
+- stale lease recovery;
+- Redis `XAUTOCLAIM` recovery;
+- bounded retry attempts;
+- global scan concurrency slots;
+- module timeouts;
+- total scan timeout;
 - cancellation handling;
-- structured scan events over WebSocket.
+- duplicate-job protection.
 
-The scanner intentionally avoids unrestricted exploit execution. Assessment modules use bounded checks and normalize their results into PHANTOM findings.
+## Scanner safety controls
 
-## Assessment coverage
+Network assessment is deliberately bounded and non-destructive.
 
-The current platform includes bounded checks for areas such as:
+Controls include:
 
-- target and asset discovery;
+- public-target validation;
+- private/loopback/link-local/multicast/reserved destination blocking;
+- DNS revalidation before outbound HTTP requests;
+- per-scan request budgets;
+- connection and request timeouts;
+- redirect limits;
+- maximum response size;
+- fixed common-port discovery set;
+- small bounded directory enumeration set;
+- harmless XSS reflection markers;
+- database error-signature checks instead of injection payloads;
+- candidate SSRF/XXE detection without exploit payloads;
+- redirect-parameter identification without following external attack destinations.
+
+## Current assessment coverage
+
+The platform includes bounded checks for areas such as:
+
+- asset and endpoint discovery;
 - DNS and subdomain signals;
 - common-port discovery;
 - HTTP security headers;
@@ -253,56 +296,45 @@ The current platform includes bounded checks for areas such as:
 - CORS configuration;
 - WAF and technology indicators;
 - endpoint and form inventory;
-- trust/security configuration checks;
-- RDAP and CVE enrichment;
+- security/trust configuration;
+- RDAP and software metadata enrichment;
 - candidate SQL injection, XSS, CSRF, SSRF, XXE, and open-redirect signals.
 
-These checks are intentionally constrained and non-destructive. A finding is an assessment signal that should be validated by an authorized security professional before remediation or escalation.
+These are assessment signals, not automatic proof of exploitability.
 
-## Finding lifecycle
+## Findings
+
+Findings contain severity, CVSS/CWE/CVE metadata where available, evidence, confidence, ownership, remediation guidance, and scan history.
+
+Lifecycle:
 
 ```text
-OPEN
-  ↓
-TRIAGED
-  ↓
-ASSIGNED
-  ↓
-IN REMEDIATION
-  ↓
-FIXED
-  ↓
-VERIFIED
-  ↓
-CLOSED
+OPEN → TRIAGED → ASSIGNED → IN REMEDIATION → FIXED → VERIFIED → CLOSED
 ```
 
 Additional outcomes include `ACCEPTED RISK` and `FALSE POSITIVE`.
 
-Findings can contain evidence, affected assets/endpoints, severity, CVSS/CWE/CVE metadata, timestamps, ownership, remediation guidance, and scan history.
+## Differential analysis
+
+PHANTOM compares scans for the same workspace asset and identifies:
+
+- new findings;
+- resolved findings;
+- persistent findings;
+- severity regressions.
 
 ## Real-time operations
 
-The live scan workflow is:
-
 ```text
-Scan created
-    ↓
-Redis Stream
-    ↓
-Native worker
-    ↓
-Scanner modules
-    ↓
-Normalized findings
-    ↓
-PostgreSQL persistence
-    ↓
-Redis Pub/Sub events
-    ↓
+Scanner
+   ↓
+PostgreSQL
+   ↓
+Redis Pub/Sub
+   ↓
 WebSocket
-    ↓
-PHANTOM Live Scan console
+   ↓
+Live Scan Console
 ```
 
 Typical events include `scan.created`, `scan.started`, `module.started`, `module.progress`, `finding.created`, `module.completed`, `scan.completed`, `scan.failed`, and `scan.cancelled`.
@@ -311,39 +343,37 @@ Typical events include `scan.created`, `scan.started`, `module.started`, `module
 
 Reports are generated from persisted assessment data and can include:
 
-1. Cover and assessment metadata
+1. Assessment metadata
 2. Executive summary
 3. Scope
 4. Methodology
 5. Risk overview
 6. Findings
 7. Evidence
-8. Remediation guidance
+8. Remediation
 9. Technical appendix
 10. Scan metadata
 
-## Security principles
+## Testing
 
-PHANTOM is designed around the following principles:
+Backend:
 
-- **Authorization first** — assessment targets must be authorized.
-- **Least privilege** — access is controlled by workspace membership and permissions.
-- **Scope isolation** — cross-workspace resource access is rejected by the backend.
-- **Bounded execution** — network activity has explicit limits and timeouts.
-- **Auditability** — security-sensitive actions are recorded.
-- **Safe defaults** — scanner modules avoid destructive exploit behavior.
-- **Server-side enforcement** — client-provided role claims are never trusted for authorization.
+```bash
+cd backend
+pytest -q
+python -m compileall -q app alembic tests
+alembic history
+alembic heads
+```
 
-## Testing and CI
-
-Frontend type checking/build:
+Frontend:
 
 ```bash
 npm run lint
 npm run build
 ```
 
-Backend validation and tests are executed by the repository's GitHub Actions workflow. CI validates Python compilation, migration integrity, backend tests, TypeScript compilation, and the production frontend build.
+GitHub Actions runs the backend and frontend validation for **`phantom-v2`**, the project's PHANTOM development branch.
 
 ## Project structure
 
@@ -351,36 +381,50 @@ Backend validation and tests are executed by the repository's GitHub Actions wor
 .
 ├── backend/
 │   ├── app/
-│   │   ├── api/          # HTTP API routes
-│   │   ├── scanners/     # Bounded assessment modules
-│   │   ├── auth.py       # Authentication
-│   │   ├── database.py   # Database bootstrap/session handling
-│   │   ├── models.py     # SQLAlchemy models
-│   │   ├── queue.py      # Redis Streams queue
-│   │   ├── rbac.py       # Permissions and roles
-│   │   ├── realtime.py   # Scan event bus
-│   │   └── worker.py     # Native scan worker
-│   ├── alembic/          # Database migrations
+│   │   ├── api/             # REST and WebSocket routes
+│   │   ├── scanners/        # Bounded assessment modules/runtime
+│   │   ├── auth.py          # Sessions and WS tickets
+│   │   ├── database.py      # Async DB sessions/bootstrap
+│   │   ├── middleware.py    # Request IDs/logging/security headers
+│   │   ├── models.py        # SQLAlchemy models
+│   │   ├── queue.py         # Redis Streams
+│   │   ├── rbac.py          # Roles and permissions
+│   │   ├── realtime.py      # Scan event bus
+│   │   ├── scan_guard.py    # Distributed scan concurrency
+│   │   ├── security_scope.py# Target scope controls
+│   │   └── worker.py        # Native scan worker
+│   ├── alembic/             # Versioned database migrations
+│   ├── tests/               # Backend tests
 │   └── requirements.txt
 ├── src/
-│   ├── components/       # Console UI components
-│   ├── lib/              # API/auth/client utilities
-│   └── pages/            # PHANTOM operator views
+│   ├── components/          # Console UI
+│   ├── lib/                 # API/auth utilities
+│   └── pages/               # Operator views
 ├── .env.example
 ├── package.json
 └── README.md
 ```
 
+## Branch
+
+PHANTOM development is maintained on:
+
+```text
+phantom-v2
+```
+
+No additional PHANTOM development branch is required.
+
 ## Originality and dependencies
 
 PHANTOM's application architecture, interface, terminology, workflows, and security logic are developed specifically for this project. The project does not present third-party proprietary or open-source application code as its own work.
 
-PHANTOM uses standard frameworks and libraries as dependencies. Their respective licenses and notices remain applicable to those dependencies.
+Standard frameworks and libraries are used as dependencies and remain subject to their respective licenses and notices.
 
 ## License
 
-A project license should be added here before public distribution. Until then, repository contents should not be assumed to be freely reusable.
+A project license should be added before public distribution. Until then, repository contents should not be assumed to be freely reusable.
 
 ## Status
 
-PHANTOM is under active development. Features, scanner coverage, integrations, and operational controls may evolve as the platform is hardened.
+PHANTOM is under active development. Scanner coverage, integrations, and operational controls will continue to evolve as the platform is hardened.
