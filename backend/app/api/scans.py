@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
 from ..database import SessionLocal, get_db
-from ..models import Asset, Finding, Scan
+from ..models import Asset, Finding, Scan, WorkspaceScope
 from ..observability import record_operational_event
 from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
-from ..security_scope import validate_target
+from ..security_scope import ScopeViolation, normalize_target, scope_snapshot, validate_target, validate_target_against_scope
 from .audit import record_audit
 from .findings import evidence_digest, fingerprint_for
 
@@ -42,16 +42,42 @@ async def _op(event_type: str, message: str, *, workspace_id: str | None = None,
     await record_operational_event(event_type, message, severity, workspace_id, scan_id, metadata)
 
 
+async def _load_scope(db: AsyncSession, workspace_id: str) -> dict[str, object] | None:
+    row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == workspace_id))
+    return scope_snapshot(row) if row else None
+
+
+async def _fail_for_scope(db: AsyncSession, scan: Scan, reason: str) -> None:
+    scan.status = "failed"
+    scan.error = f"Scope policy blocked execution: {reason}"
+    scan.completed_at = datetime.now(timezone.utc)
+    scan.worker_id = None
+    scan.lease_expires_at = None
+    await db.commit()
+    await _op("scan.scope_blocked", "Scan blocked by workspace scope", workspace_id=scan.workspace_id, scan_id=scan.id, severity="warning", metadata={"reason": reason})
+    await bus.publish(scan.id, {"event": "scan.failed", "scan_id": scan.id, "error": scan.error})
+
+
 async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool:
     async with SessionLocal() as db:
         scan = await db.get(Scan, scan_id)
         if not scan or (expected_worker and scan.worker_id != expected_worker):
             return False
 
+        scope = await _load_scope(db, scan.workspace_id) if scan.workspace_id else None
+        if scope is None:
+            await _fail_for_scope(db, scan, "workspace scope is not configured")
+            return False
+        try:
+            validate_target_against_scope(scan.target, scope)
+        except ScopeViolation as exc:
+            await _fail_for_scope(db, scan, str(exc))
+            return False
+
         scan.status = "running"
         scan.started_at = scan.started_at or datetime.now(timezone.utc)
         await db.commit()
-        await _op("scan.started", "Scan execution started", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"worker_id": expected_worker, "attempt": scan.attempt, "profile": scan.profile})
+        await _op("scan.started", "Scan execution started", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"worker_id": expected_worker, "attempt": scan.attempt, "profile": scan.profile, "scope_id": scope.get("id")})
         await bus.publish(scan_id, {"event": "scan.started", "scan_id": scan_id})
 
         try:
@@ -69,7 +95,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
 
                 await _op("module.started", f"Scanner module started: {module_name}", workspace_id=state.workspace_id, scan_id=state.id, metadata={"module": module_name, "index": index, "total": total})
                 await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
-                result = await run_module(module_name, scan.target, runtime_id=scan.id)
+                result = await run_module(module_name, scan.target, runtime_id=scan.id, scope=scope)
                 result_status = str(result.get("status", "ok"))
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
@@ -149,12 +175,22 @@ async def _finish_cancellation(db: AsyncSession, scan: Scan, scan_id: str) -> No
 @router.get("/modules")
 async def list_modules(principal: Principal = Depends(require_permission("scan:view"))):
     del principal
-    return {"count": len(MODULES), "modules": [{"id": name, "status": "implemented"} for name in MODULES], "profiles": {key: list(value) for key, value in PROFILES.items()}}
+    return {"count": len(MODULES), "modules": [{"id": name, "status": "implemented"} for name in MODULES], "profiles": {key: list(value) for key, value in PROFILES.items()}, "scope_required": True}
 
 
 @router.post("")
 async def create_scan(payload: ScanRequest, request: Request, principal: Principal = Depends(require_permission("scan:create")), db: AsyncSession = Depends(get_db)):
-    target = validate_target(payload.target)
+    scope = await _load_scope(db, principal.workspace_id)
+    if scope is None:
+        raise HTTPException(409, "Workspace scope is not configured. Configure an authorized scope before starting scans.")
+    try:
+        normalized = normalize_target(payload.target)
+        validate_target_against_scope(normalized, scope)
+    except ScopeViolation as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    target = validate_target(normalized)
     asset = await db.scalar(select(Asset).where(Asset.workspace_id == principal.workspace_id, Asset.host == target["host"]))
     if not asset:
         asset = Asset(host=target["host"], target=target["target"], workspace_id=principal.workspace_id)
@@ -162,11 +198,11 @@ async def create_scan(payload: ScanRequest, request: Request, principal: Princip
         await db.flush()
     scan = Scan(id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile, modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id, workspace_id=principal.workspace_id, attempt=1)
     db.add(scan)
-    await record_audit(db, request, "scan.created", "scan", scan.id, {"target": scan.target, "profile": scan.profile}, principal)
+    await record_audit(db, request, "scan.created", "scan", scan.id, {"target": scan.target, "profile": scan.profile, "scope_id": scope.get("id")}, principal)
     await db.commit()
     await db.refresh(scan)
     await enqueue_scan(scan.id)
-    await _op("scan.queued", "Scan queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt})
+    await _op("scan.queued", "Scan queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt, "scope_id": scope.get("id")})
     await bus.publish(scan.id, {"event": "scan.created", "scan_id": scan.id})
     return serialize_scan(scan)
 
@@ -180,6 +216,13 @@ async def run_scan(scan_id: str, request: Request, principal: Principal = Depend
         raise HTTPException(409, "Scan is already queued or running")
     if scan.status == "cancelled":
         raise HTTPException(409, "Cancelled scans cannot be restarted")
+    scope = await _load_scope(db, principal.workspace_id)
+    if scope is None:
+        raise HTTPException(409, "Workspace scope is not configured")
+    try:
+        validate_target_against_scope(scan.target, scope)
+    except ScopeViolation as exc:
+        raise HTTPException(403, str(exc)) from exc
     scan.status = "queued"
     scan.error = None
     scan.worker_id = None
@@ -188,10 +231,10 @@ async def run_scan(scan_id: str, request: Request, principal: Principal = Depend
     scan.cancelled_at = None
     scan.completed_at = None
     scan.attempt = 1
-    await record_audit(db, request, "scan.queued", "scan", scan.id, None, principal)
+    await record_audit(db, request, "scan.queued", "scan", scan.id, {"scope_id": scope.get("id")}, principal)
     await db.commit()
     await enqueue_scan(scan_id)
-    await _op("scan.queued", "Scan re-queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt})
+    await _op("scan.queued", "Scan re-queued for execution", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"profile": scan.profile, "attempt": scan.attempt, "scope_id": scope.get("id")})
     return serialize_scan(scan)
 
 
