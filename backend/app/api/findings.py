@@ -1,5 +1,6 @@
 from __future__ import annotations
 import hashlib
+import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -14,7 +15,10 @@ router=APIRouter(prefix="/api/v1/findings",tags=["findings"])
 STATUSES={"open","triaged","assigned","in_remediation","fixed","verified","closed","accepted_risk","false_positive"}
 TRANSITIONS={"open":{"triaged","accepted_risk","false_positive"},"triaged":{"assigned","in_remediation","accepted_risk","false_positive","open"},"assigned":{"in_remediation","triaged","accepted_risk","false_positive"},"in_remediation":{"fixed","assigned","accepted_risk"},"fixed":{"verified","in_remediation"},"verified":{"closed","in_remediation"},"closed":{"open"},"accepted_risk":{"open","triaged"},"false_positive":{"open","triaged"}}
 class FindingUpdate(BaseModel):status:str|None=Field(default=None);assignee:str|None=Field(default=None,max_length=255)
-def serialize(f):return {"id":f.id,"scan_id":f.scan_id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"confidence":f.confidence,"first_seen":f.first_seen.isoformat() if f.first_seen else None,"last_seen":f.last_seen.isoformat() if f.last_seen else None}
+def evidence_digest(evidence:dict|None)->str:
+    canonical=json.dumps(evidence or {},sort_keys=True,separators=(",",":"),ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+def serialize(f):return {"id":f.id,"scan_id":f.scan_id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"evidence_hash":f.evidence_hash,"evidence_collected_at":f.evidence_collected_at.isoformat() if f.evidence_collected_at else None,"evidence_source":f.evidence_source,"confidence":f.confidence,"first_seen":f.first_seen.isoformat() if f.first_seen else None,"last_seen":f.last_seen.isoformat() if f.last_seen else None}
 def fingerprint_for(scan:Scan,item:dict)->str:
  evidence=item.get("evidence") or {};stable=evidence.get("url") or evidence.get("path") or evidence.get("host") or "";return hashlib.sha256(f"{scan.host}|{item.get('module','')}|{item.get('title','')}|{stable}".lower().encode()).hexdigest()
 def scoped_finding(finding_id,workspace_id,db):return db.scalar(select(Finding).join(Scan).where(Finding.id==finding_id,Scan.workspace_id==workspace_id))
