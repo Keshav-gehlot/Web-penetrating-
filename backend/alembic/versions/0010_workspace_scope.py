@@ -18,7 +18,7 @@ def upgrade():
         sa.Column("authorized_targets", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("excluded_targets", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("allowed_ports", sa.JSON(), nullable=False, server_default=sa.text("'[80, 443]'")),
-        sa.Column("allowed_paths", sa.JSON(), nullable=False, server_default=sa.text("'[/]'")),
+        sa.Column("allowed_paths", sa.JSON(), nullable=False, server_default=sa.text("'[\"/\"]'")),
         sa.Column("blocked_paths", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("max_requests", sa.Integer(), nullable=False, server_default="250"),
         sa.Column("max_concurrency", sa.Integer(), nullable=False, server_default="1"),
