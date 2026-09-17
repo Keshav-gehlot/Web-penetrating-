@@ -17,14 +17,12 @@ class ScanRuntime:
 
 _CURRENT: contextvars.ContextVar[ScanRuntime | None] = contextvars.ContextVar("phantom_scan_runtime", default=None)
 
-
 def ensure_runtime(scope_id: str) -> ScanRuntime:
     current = _CURRENT.get()
     if current is None or current.scope_id != scope_id:
         current = ScanRuntime(scope_id=scope_id)
         _CURRENT.set(current)
     return current
-
 
 def _consume_request() -> None:
     runtime = _CURRENT.get()
@@ -33,7 +31,6 @@ def _consume_request() -> None:
     runtime.requests += 1
     if runtime.requests > settings.SCAN_REQUEST_BUDGET:
         raise RuntimeError(f"Scan request budget of {settings.SCAN_REQUEST_BUDGET} exceeded")
-
 
 def _assert_public_host(url: str) -> None:
     host = urlparse(url).hostname
@@ -45,9 +42,8 @@ def _assert_public_host(url: str) -> None:
         raise RuntimeError(f"DNS resolution failed for scanner target: {host}") from exc
     for address in addresses:
         ip = ipaddress.ip_address(address)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
             raise RuntimeError("Outbound scanner request resolved to a non-public address")
-
 
 async def bounded_get(target: str, path: str = "") -> httpx.Response:
     _consume_request()
@@ -58,7 +54,6 @@ async def bounded_get(target: str, path: str = "") -> httpx.Response:
     if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
         raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit")
     return response
-
 
 async def bounded_snapshot(target: str) -> httpx.Response:
     _consume_request()
