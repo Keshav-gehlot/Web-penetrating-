@@ -24,24 +24,28 @@ CONSUMER = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 HEARTBEAT_TTL = max(20, int(os.getenv("PHANTOM_WORKER_HEARTBEAT_TTL", "30")))
 
 
+def normalize_attempt(value: object) -> int:
+    try:
+        attempt = int(value)
+    except (TypeError, ValueError):
+        attempt = 1
+    return max(1, min(attempt, MAX_ATTEMPTS))
+
+
+def recovery_attempt(current_attempt: object) -> int | None:
+    try:
+        current = int(current_attempt or 1)
+    except (TypeError, ValueError):
+        current = 1
+    next_attempt = max(1, current + 1)
+    return next_attempt if next_attempt <= MAX_ATTEMPTS else None
+
+
 async def claim_scan(scan_id: str, attempt: int) -> bool:
     now = datetime.now(timezone.utc)
     lease = now + timedelta(seconds=JOB_LEASE_SECONDS)
     async with SessionLocal() as db:
-        result = await db.execute(
-            update(Scan)
-            .where(Scan.id == scan_id, Scan.status == "queued")
-            .values(
-                status="running",
-                started_at=now,
-                worker_id=CONSUMER,
-                lease_expires_at=lease,
-                cancel_requested_at=None,
-                cancelled_at=None,
-                error=None,
-                attempt=attempt,
-            )
-        )
+        result = await db.execute(update(Scan).where(Scan.id == scan_id, Scan.status == "queued").values(status="running", started_at=now, worker_id=CONSUMER, lease_expires_at=lease, cancel_requested_at=None, cancelled_at=None, error=None, attempt=attempt))
         await db.commit()
         return result.rowcount == 1
 
@@ -49,11 +53,7 @@ async def claim_scan(scan_id: str, attempt: int) -> bool:
 async def refresh_lease(scan_id: str) -> bool:
     lease = datetime.now(timezone.utc) + timedelta(seconds=JOB_LEASE_SECONDS)
     async with SessionLocal() as db:
-        result = await db.execute(
-            update(Scan)
-            .where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running")
-            .values(lease_expires_at=lease)
-        )
+        result = await db.execute(update(Scan).where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running").values(lease_expires_at=lease))
         await db.commit()
         return result.rowcount == 1
 
@@ -62,16 +62,10 @@ async def recover_stale_scans() -> int:
     now = datetime.now(timezone.utc)
     recovered: list[tuple[str, int]] = []
     async with SessionLocal() as db:
-        rows = await db.scalars(
-            select(Scan).where(
-                Scan.status == "running",
-                Scan.lease_expires_at.is_not(None),
-                Scan.lease_expires_at < now,
-            )
-        )
+        rows = await db.scalars(select(Scan).where(Scan.status == "running", Scan.lease_expires_at.is_not(None), Scan.lease_expires_at < now))
         for scan in rows.all():
-            next_attempt = max(1, int(scan.attempt or 1) + 1)
-            if next_attempt > MAX_ATTEMPTS:
+            next_attempt = recovery_attempt(scan.attempt)
+            if next_attempt is None:
                 scan.status = "failed"
                 scan.error = f"Worker lease expired after {MAX_ATTEMPTS} execution attempts."
                 scan.worker_id = None
@@ -84,7 +78,6 @@ async def recover_stale_scans() -> int:
             scan.attempt = next_attempt
             recovered.append((scan.id, next_attempt))
         await db.commit()
-
     for scan_id, attempt in recovered:
         try:
             await enqueue_retry(scan_id, attempt)
@@ -96,17 +89,11 @@ async def recover_stale_scans() -> int:
 async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, message: str) -> None:
     next_status = "queued" if attempt < MAX_ATTEMPTS else "failed"
     async with SessionLocal() as db:
-        result = await db.execute(
-            update(Scan)
-            .where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running")
-            .values(status=next_status, error=message, worker_id=None, lease_expires_at=None)
-        )
+        result = await db.execute(update(Scan).where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running").values(status=next_status, error=message, worker_id=None, lease_expires_at=None))
         await db.commit()
-
     if result.rowcount != 1:
         await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
         return
-
     if attempt < MAX_ATTEMPTS:
         await enqueue_retry(scan_id, attempt + 1)
     await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
@@ -117,20 +104,12 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
     if not scan_id:
         await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
         return
-
-    try:
-        attempt = int(fields.get("attempt", "1"))
-    except (TypeError, ValueError):
-        await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
-        return
-    attempt = max(1, min(attempt, MAX_ATTEMPTS))
-
+    attempt = normalize_attempt(fields.get("attempt", "1"))
     slot = None
     while slot is None:
         slot = await acquire_slot(client, settings.MAX_CONCURRENT_SCANS, CONSUMER)
         if slot is None:
             await asyncio.sleep(1)
-
     slot_key, slot_token = slot
     try:
         if not await claim_scan(scan_id, attempt):
@@ -140,7 +119,6 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             if terminal_or_active:
                 await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
             return
-
         stop = asyncio.Event()
         lease_lost = asyncio.Event()
 
@@ -157,35 +135,18 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                         return
 
         heartbeat_task = asyncio.create_task(heartbeat())
-        execution_task = asyncio.create_task(
-            asyncio.wait_for(
-                execute_scan(scan_id, expected_worker=CONSUMER),
-                timeout=settings.SCAN_TOTAL_TIMEOUT_SECONDS,
-            )
-        )
+        execution_task = asyncio.create_task(asyncio.wait_for(execute_scan(scan_id, expected_worker=CONSUMER), timeout=settings.SCAN_TOTAL_TIMEOUT_SECONDS))
         try:
-            done, _ = await asyncio.wait(
-                {execution_task, heartbeat_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
+            done, _ = await asyncio.wait({execution_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED)
             if heartbeat_task in done and lease_lost.is_set():
-                # The database/Redis lease is no longer owned by this worker.
-                # Stop network work immediately. Do not ACK the stream message:
-                # recovery must reclaim or re-enqueue it for another worker.
                 execution_task.cancel()
                 await asyncio.gather(execution_task, return_exceptions=True)
                 return
-
             if heartbeat_task in done:
-                # Heartbeat exited unexpectedly without reporting lease loss.
-                # Treat that as an execution-ownership failure rather than
-                # continuing without a live lease.
                 execution_task.cancel()
                 await asyncio.gather(execution_task, return_exceptions=True)
                 await retry_or_fail(client, message_id, scan_id, attempt, "Worker heartbeat stopped unexpectedly")
                 return
-
             success = execution_task.result()
             async with SessionLocal() as db:
                 scan = await db.get(Scan, scan_id)
