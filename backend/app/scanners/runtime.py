@@ -78,6 +78,34 @@ def _assert_scope_url(url: str) -> None:
         raise RuntimeError("Outbound scanner path is blocked by the workspace scope")
 
 
+def bounded_resolve(host: str) -> list[str]:
+    runtime = _CURRENT.get()
+    if runtime is not None and runtime.scope is not None and not scope_host_allowed(host, runtime.scope):
+        raise RuntimeError("Outbound DNS lookup is outside the authorized workspace scope")
+    _consume_request()
+    return _resolve_public_addresses(host)
+
+
+def scoped_tcp_socket(host: str, port: int) -> socket.socket:
+    runtime = _CURRENT.get()
+    if runtime is not None and runtime.scope is not None:
+        if not scope_host_allowed(host, runtime.scope):
+            raise RuntimeError("Outbound scanner connection is outside the authorized workspace scope")
+        if not scope_port_allowed(port, runtime.scope):
+            raise RuntimeError(f"Outbound scanner port {port} is not allowed by the workspace scope")
+    _consume_request()
+    addresses = _resolve_public_addresses(host)
+    last_error: OSError | None = None
+    for address in addresses:
+        try:
+            return socket.create_connection((address, port), timeout=settings.SCAN_CONNECT_TIMEOUT_SECONDS)
+        except OSError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"Unable to connect to {host}:{port}")
+
+
 async def bounded_get(target: str, path: str = "") -> httpx.Response:
     _consume_request()
     url = urljoin(target.rstrip("/") + "/", path.lstrip("/"))
@@ -123,20 +151,5 @@ async def bounded_snapshot(target: str) -> httpx.Response:
 
 
 def bounded_connect(host: str, port: int) -> None:
-    runtime = _CURRENT.get()
-    if runtime is not None and runtime.scope is not None:
-        if not scope_host_allowed(host, runtime.scope):
-            raise RuntimeError("Outbound scanner connection is outside the authorized workspace scope")
-        if not scope_port_allowed(port, runtime.scope):
-            raise RuntimeError(f"Outbound scanner port {port} is not allowed by the workspace scope")
-    _consume_request()
-    addresses = _resolve_public_addresses(host)
-    last_error: OSError | None = None
-    for address in addresses:
-        try:
-            with socket.create_connection((address, port), timeout=settings.SCAN_CONNECT_TIMEOUT_SECONDS):
-                return
-        except OSError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
+    sock = scoped_tcp_socket(host, port)
+    sock.close()
