@@ -53,11 +53,12 @@ def validate_target(value: str) -> dict[str, object]:
     assert host is not None
     try:
         ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
             raise HTTPException(400, "Private, loopback, link-local, multicast, reserved, or local targets are not allowed")
         return {"target": normalized, "host": host, "is_ip": True}
-    except ValueError:
-        pass
 
     host = host.rstrip(".").lower()
     if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
@@ -95,13 +96,13 @@ def normalize_scope_entry(value: str) -> str:
         return f"*.{hostname}"
     try:
         ip = ipaddress.ip_address(entry)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
-            raise ValueError("Private, loopback, link-local, multicast, reserved, and unspecified IPs cannot be authorized")
-        return str(ip)
     except ValueError:
         if not _HOST_LABEL.fullmatch(entry):
             raise ValueError(f"Invalid hostname scope entry: {value}")
         return entry
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        raise ValueError("Private, loopback, link-local, multicast, reserved, and unspecified IPs cannot be authorized")
+    return str(ip)
 
 
 def normalize_path_rule(value: str) -> str:
@@ -113,11 +114,13 @@ def normalize_path_rule(value: str) -> str:
     return rule
 
 
-def validate_scope_policy(policy: dict[str, object], *, max_concurrency: int, max_requests: int, max_redirects: int) -> dict[str, object]:
+def validate_scope_policy(
+    policy: dict[str, object], *, max_concurrency: int, max_requests: int, max_redirects: int
+) -> dict[str, object]:
     authorized = [normalize_scope_entry(str(x)) for x in policy.get("authorized_targets", [])]
     excluded = [normalize_scope_entry(str(x)) for x in policy.get("excluded_targets", [])]
-    if not authorized:
-        raise ValueError("At least one authorized target is required")
+    if policy.get("enabled") and not authorized:
+        raise ValueError("At least one authorized target is required when the scope is enabled")
     if len(set(authorized)) != len(authorized):
         raise ValueError("Authorized target entries must be unique")
     if len(set(excluded)) != len(excluded):
@@ -133,7 +136,7 @@ def validate_scope_policy(policy: dict[str, object], *, max_concurrency: int, ma
         raise ValueError("max_concurrency must be positive")
     if max_redirects < 0:
         raise ValueError("max_redirects cannot be negative")
-    if policy.get("authorization_acknowledged") is not True:
+    if policy.get("enabled") and policy.get("authorization_acknowledged") is not True:
         raise ValueError("Authorization acknowledgement is required before enabling a scope")
     return {
         "authorized_targets": authorized,
