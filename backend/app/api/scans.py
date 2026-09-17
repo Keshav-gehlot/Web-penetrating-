@@ -91,26 +91,12 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                 if expected_worker and state.worker_id != expected_worker:
                     return False
 
-                await bus.publish(
-                    scan_id,
-                    {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total},
-                )
+                await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
                 result = await run_module(module_name, scan.target, runtime_id=scan.id)
                 result_status = str(result.get("status", "ok"))
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
-                    await bus.publish(
-                        scan_id,
-                        {
-                            "event": "module.failed",
-                            "scan_id": scan_id,
-                            "module": module_name,
-                            "index": index,
-                            "total": total,
-                            "status": result_status,
-                            "error": error,
-                        },
-                    )
+                    await bus.publish(scan_id, {"event": "module.failed", "scan_id": scan_id, "module": module_name, "index": index, "total": total, "status": result_status, "error": error})
                     raise RuntimeError(f"Module {module_name} {result_status}: {error}")
 
                 seen: set[str] = set()
@@ -128,37 +114,18 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     if fingerprint in seen:
                         continue
                     seen.add(fingerprint)
-                    existing = await db.scalar(
-                        select(Finding).where(Finding.scan_id == scan.id, Finding.fingerprint == fingerprint)
-                    )
+                    existing = await db.scalar(select(Finding).where(Finding.scan_id == scan.id, Finding.fingerprint == fingerprint))
                     if existing:
                         existing.last_seen = datetime.now(timezone.utc)
                         continue
 
-                    finding = Finding(
-                        scan_id=scan.id,
-                        module=item.get("module", module_name),
-                        title=item.get("title", "Untitled finding"),
-                        severity=item.get("severity", "info"),
-                        status="open",
-                        fingerprint=fingerprint,
-                        cve=item.get("cve"),
-                        cwe=item.get("cwe"),
-                        cvss=item.get("cvss"),
-                        description=item.get("description", ""),
-                        remediation=item.get("remediation", ""),
-                        evidence=item.get("evidence", {}),
-                        confidence=float(item.get("confidence", 1.0)),
-                    )
+                    finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=item.get("evidence", {}), confidence=float(item.get("confidence", 1.0)))
                     db.add(finding)
                     await db.flush()
                     await bus.publish(scan_id, {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(finding)})
 
                 await db.commit()
-                await bus.publish(
-                    scan_id,
-                    {"event": "module.completed", "scan_id": scan_id, "module": module_name, "index": index, "total": total},
-                )
+                await bus.publish(scan_id, {"event": "module.completed", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
 
             scan.status = "completed"
             scan.completed_at = datetime.now(timezone.utc)
@@ -168,6 +135,10 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
             await bus.publish(scan_id, {"event": "scan.completed", "scan_id": scan_id})
             return True
         except Exception as exc:
+            state = await db.get(Scan, scan_id)
+            if state and (state.status == "cancelled" or state.cancel_requested_at is not None):
+                await _finish_cancellation(db, state, scan_id)
+                return False
             scan.status = "failed"
             scan.error = str(exc)
             scan.completed_at = datetime.now(timezone.utc)
@@ -197,30 +168,14 @@ async def list_modules(principal: Principal = Depends(require_permission("scan:v
 
 
 @router.post("")
-async def create_scan(
-    payload: ScanRequest,
-    request: Request,
-    principal: Principal = Depends(require_permission("scan:create")),
-    db: AsyncSession = Depends(get_db),
-):
+async def create_scan(payload: ScanRequest, request: Request, principal: Principal = Depends(require_permission("scan:create")), db: AsyncSession = Depends(get_db)):
     target = validate_target(payload.target)
     asset = await db.scalar(select(Asset).where(Asset.workspace_id == principal.workspace_id, Asset.host == target["host"]))
     if not asset:
         asset = Asset(host=target["host"], target=target["target"], workspace_id=principal.workspace_id)
         db.add(asset)
         await db.flush()
-
-    scan = Scan(
-        id=str(uuid4()),
-        target=target["target"],
-        host=target["host"],
-        profile=payload.profile,
-        modules=list(PROFILES[payload.profile]),
-        status="queued",
-        asset_id=asset.id,
-        workspace_id=principal.workspace_id,
-        attempt=1,
-    )
+    scan = Scan(id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile, modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id, workspace_id=principal.workspace_id, attempt=1)
     db.add(scan)
     await record_audit(db, request, "scan.created", "scan", scan.id, {"target": scan.target, "profile": scan.profile}, principal)
     await db.commit()
@@ -231,12 +186,7 @@ async def create_scan(
 
 
 @router.post("/{scan_id}/run")
-async def run_scan(
-    scan_id: str,
-    request: Request,
-    principal: Principal = Depends(require_permission("scan:create")),
-    db: AsyncSession = Depends(get_db),
-):
+async def run_scan(scan_id: str, request: Request, principal: Principal = Depends(require_permission("scan:create")), db: AsyncSession = Depends(get_db)):
     scan = await db.scalar(select(Scan).where(Scan.id == scan_id, Scan.workspace_id == principal.workspace_id))
     if not scan:
         raise HTTPException(404, "Scan not found")
@@ -244,7 +194,6 @@ async def run_scan(
         raise HTTPException(409, "Scan is already queued or running")
     if scan.status == "cancelled":
         raise HTTPException(409, "Cancelled scans cannot be restarted")
-
     scan.status = "queued"
     scan.error = None
     scan.worker_id = None
@@ -260,18 +209,12 @@ async def run_scan(
 
 
 @router.post("/{scan_id}/cancel")
-async def cancel_scan(
-    scan_id: str,
-    request: Request,
-    principal: Principal = Depends(require_permission("scan:cancel")),
-    db: AsyncSession = Depends(get_db),
-):
+async def cancel_scan(scan_id: str, request: Request, principal: Principal = Depends(require_permission("scan:cancel")), db: AsyncSession = Depends(get_db)):
     scan = await db.scalar(select(Scan).where(Scan.id == scan_id, Scan.workspace_id == principal.workspace_id))
     if not scan:
         raise HTTPException(404, "Scan not found")
     if scan.status in {"completed", "failed", "cancelled"}:
         return serialize_scan(scan)
-
     now = datetime.now(timezone.utc)
     scan.cancel_requested_at = now
     if scan.status == "queued":
@@ -296,29 +239,14 @@ async def scan_delta(scan_id: str, principal: Principal = Depends(require_permis
     current = await db.scalar(select(Scan).where(Scan.id == scan_id, Scan.workspace_id == principal.workspace_id))
     if not current:
         raise HTTPException(404, "Scan not found")
-    previous = await db.scalar(
-        select(Scan).where(
-            Scan.asset_id == current.asset_id,
-            Scan.workspace_id == principal.workspace_id,
-            Scan.id != scan_id,
-            Scan.status == "completed",
-        ).order_by(Scan.completed_at.desc())
-    )
+    previous = await db.scalar(select(Scan).where(Scan.asset_id == current.asset_id, Scan.workspace_id == principal.workspace_id, Scan.id != scan_id, Scan.status == "completed").order_by(Scan.completed_at.desc()))
     rows = await db.scalars(select(Finding).where(Finding.scan_id == scan_id))
     current_map = {finding.fingerprint: finding for finding in rows.all()}
     if not previous:
         return {"scan_id": scan_id, "previous_scan_id": None, "new": [serialize_finding(f) for f in current_map.values()], "resolved": [], "persistent": [], "regressions": []}
-
     rows = await db.scalars(select(Finding).where(Finding.scan_id == previous.id))
     previous_map = {finding.fingerprint: finding for finding in rows.all()}
-    return {
-        "scan_id": scan_id,
-        "previous_scan_id": previous.id,
-        "new": [serialize_finding(current_map[key]) for key in current_map.keys() - previous_map.keys()],
-        "resolved": [serialize_finding(previous_map[key]) for key in previous_map.keys() - current_map.keys()],
-        "persistent": [serialize_finding(current_map[key]) for key in current_map.keys() & previous_map.keys()],
-        "regressions": [serialize_finding(current_map[key]) for key in current_map.keys() & previous_map.keys() if severity_rank(current_map[key].severity) > severity_rank(previous_map[key].severity)],
-    }
+    return {"scan_id": scan_id, "previous_scan_id": previous.id, "new": [serialize_finding(current_map[key]) for key in current_map.keys() - previous_map.keys()], "resolved": [serialize_finding(previous_map[key]) for key in previous_map.keys() - current_map.keys()], "persistent": [serialize_finding(current_map[key]) for key in current_map.keys() & previous_map.keys()], "regressions": [serialize_finding(current_map[key]) for key in current_map.keys() & previous_map.keys() if severity_rank(current_map[key].severity) > severity_rank(previous_map[key].severity)]}
 
 
 @router.get("/{scan_id}")
