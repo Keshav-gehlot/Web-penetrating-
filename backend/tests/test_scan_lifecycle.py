@@ -12,6 +12,9 @@ async def test_execute_scan_fails_when_module_times_out(monkeypatch):
         target = "https://example.com"
         modules = ["test_module"]
         status = "running"
+        profile = "standard"
+        attempt = 1
+        workspace_id = "workspace-1"
         started_at = None
         completed_at = None
         worker_id = "worker-1"
