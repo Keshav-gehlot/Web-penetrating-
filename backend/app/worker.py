@@ -77,6 +77,16 @@ async def recover_stale_scans() -> int:
             recovered.append(scan.id)
         if recovered:
             await db.commit()
+
+    # A DB lease can expire after the Redis stream message has already been
+    # acknowledged. Re-enqueue every recovered scan so that it cannot become
+    # permanently queued with no pending job. Duplicate messages are safe:
+    # claim_scan() atomically permits only one worker to claim the scan.
+    for scan_id in recovered:
+        try:
+            await enqueue_retry(scan_id, 1)
+        except Exception:
+            log.exception("Failed to re-enqueue recovered scan %s", scan_id)
     return len(recovered)
 
 
