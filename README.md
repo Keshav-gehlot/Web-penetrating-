@@ -1,6 +1,6 @@
 # PHANTOM Security Platform
 
-PHANTOM is an enterprise-oriented security assessment and cybersecurity operations platform for authorized security testing. It provides a workspace-scoped operator console, controlled scan execution, finding management, investigation workflows, reporting, auditability, and real-time scan visibility.
+PHANTOM is an enterprise-oriented security assessment and cybersecurity operations platform for authorized security testing. It provides a workspace-scoped operator console, controlled scan execution, finding management, investigation workflows, reporting, auditability, real-time scan visibility, and native endpoint network observability.
 
 > **Security boundary:** Use PHANTOM only against systems you own or have explicit authorization to assess. The platform is designed around bounded, non-destructive assessment workflows and does not provide unrestricted exploit automation.
 
@@ -13,31 +13,33 @@ React / TypeScript / Vite
           ▼
      FastAPI application
           │
-   ┌──────┼────────┐
-   ▼      ▼        ▼
-PostgreSQL Redis   Security services
-   │      │        Auth / RBAC / Scope
-   │      │        Assets / Findings
-   │      ▼        Reports / Audit
-   │  Redis Streams
-   │      │
-   │      ▼
-   │ Native PHANTOM Worker
-   │      │
-   └──────┼──────────────┐
-          ▼              ▼
-     Scan modules    Result normalization
-          │              │
-          └──────┬───────┘
-                 ▼
-          Findings + Evidence
-                 │
-          Reports / Remediation
+   ┌──────┼───────────────┐
+   ▼      ▼               ▼
+PostgreSQL Redis     Network Monitor
+   │      │            (native psutil)
+   │      │               │
+   │      ▼               │
+   │  Redis Streams       │
+   │      │               │
+   │      ▼               │
+   │ Native PHANTOM Worker│
+   │      │               │
+   └──────┼───────────────┘
+          ▼
+     Scan modules
+          │
+          ▼
+ Result normalization
+          │
+          ▼
+ Findings + Evidence
+          │
+ Reports / Remediation
 ```
 
 ## Backend
 
-The backend is a native Python service built with FastAPI and asynchronous SQLAlchemy. It is intentionally separated into API, persistence, authentication, authorization, scope validation, scanner runtime, queue, real-time event, and worker layers.
+The backend is a native Python service built with FastAPI and asynchronous SQLAlchemy. It is separated into API, persistence, authentication, authorization, scope validation, scanner runtime, queue, real-time event, worker, and network-observability layers.
 
 ### Backend capabilities
 
@@ -56,6 +58,7 @@ The backend is a native Python service built with FastAPI and asynchronous SQLAl
 - Per-scan request budgets, redirect limits, response-size limits, and public-target protections
 - Audit events for security-sensitive operations
 - Controlled, non-destructive assessment modules
+- Native endpoint network visibility without an IPC/socket traffic daemon
 
 ## Runtime
 
@@ -90,6 +93,7 @@ The backend is a native Python service built with FastAPI and asynchronous SQLAl
 - Redis Streams
 - Alembic
 - httpx
+- psutil
 - ReportLab
 - pytest / pytest-asyncio
 
@@ -192,22 +196,37 @@ GET /ready
 
 Development API documentation is available at `/docs` and `/redoc`. These documentation endpoints are disabled when `PHANTOM_ENV=production`.
 
-## Database migrations
+## Network observability
 
-Alembic is the source of truth for schema changes.
+PHANTOM now includes a native Python network-observability layer based on `psutil`. It does **not** require a separate packet-capture daemon, Unix socket, named pipe, or Docker service.
 
-```bash
-cd backend
-alembic upgrade head
+The monitor provides:
+
+- active TCP/UDP connection inventory;
+- listening-service visibility;
+- owning PID/process name where the OS permits access;
+- executable-path context where permitted;
+- first-seen tracking for new connections;
+- sensitive-service port risk signals;
+- external exposure signals for selected sensitive services;
+- process executable path checks for temporary/download locations;
+- total network I/O counters;
+- per-interface I/O counters;
+- send/receive bytes-per-second measurements;
+- VPN/tunnel-like interface detection;
+- bounded in-memory connection history.
+
+Endpoints:
+
+```text
+GET /api/v1/network/snapshot
+GET /api/v1/network/connections
+GET /api/v1/network/interfaces
 ```
 
-Create a migration during development:
+All three endpoints require the authenticated `scan:view` permission.
 
-```bash
-alembic revision --autogenerate -m "describe the schema change"
-```
-
-Always review generated migrations before applying them. Production deployments should run migrations explicitly; application startup does not modify table definitions.
+The monitor is intentionally an observability layer. It does not inject packets, manipulate traffic, perform packet replay, or automatically terminate connections.
 
 ## Authentication and authorization
 
@@ -224,7 +243,7 @@ Roles:
 
 Examples of protected permissions include `scan:create`, `scan:cancel`, `finding:assign`, `finding:close`, `report:export`, `users:manage`, and `audit:view`.
 
-Real-time scan connections use a separate short-lived, single-use WebSocket ticket. The ticket is bound to the scan and workspace and the membership is revalidated when the ticket is consumed.
+Real-time scan connections use a separate short-lived, single-use WebSocket ticket. The ticket is bound to the scan and workspace and membership is revalidated when the ticket is consumed.
 
 ## Scan execution
 
@@ -387,6 +406,7 @@ GitHub Actions runs the backend and frontend validation for **`phantom-v2`**, th
 │   │   ├── database.py      # Async DB sessions/bootstrap
 │   │   ├── middleware.py    # Request IDs/logging/security headers
 │   │   ├── models.py        # SQLAlchemy models
+│   │   ├── network_monitor.py# Native endpoint network observability
 │   │   ├── queue.py         # Redis Streams
 │   │   ├── rbac.py          # Roles and permissions
 │   │   ├── realtime.py      # Scan event bus
@@ -417,7 +437,7 @@ No additional PHANTOM development branch is required.
 
 ## Originality and dependencies
 
-PHANTOM's application architecture, interface, terminology, workflows, and security logic are developed specifically for this project. The project does not present third-party proprietary or open-source application code as its own work.
+The requested source repository is owned by you. I used it as a feature reference and did not copy its application code into PHANTOM. PHANTOM's application architecture, interface, terminology, workflows, and security logic remain developed specifically for this project.
 
 Standard frameworks and libraries are used as dependencies and remain subject to their respective licenses and notices.
 
@@ -427,4 +447,4 @@ A project license should be added before public distribution. Until then, reposi
 
 ## Status
 
-PHANTOM is under active development. Scanner coverage, integrations, and operational controls will continue to evolve as the platform is hardened.
+PHANTOM is under active development. Scanner coverage, integrations, network observability, and operational controls will continue to evolve as the platform is hardened.
