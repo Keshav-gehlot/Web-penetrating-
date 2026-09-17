@@ -146,6 +146,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             return
 
         stop = asyncio.Event()
+        lease_lost = asyncio.Event()
 
         async def heartbeat() -> None:
             interval = max(5, min(JOB_LEASE_SECONDS // 3, HEARTBEAT_TTL))
@@ -155,15 +156,48 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                 except asyncio.TimeoutError:
                     if not await refresh_lease(scan_id) or not await refresh_slot(client, slot_key, slot_token):
                         log.error("Lost execution lease for scan %s", scan_id)
+                        lease_lost.set()
                         stop.set()
                         return
 
         heartbeat_task = asyncio.create_task(heartbeat())
-        try:
-            success = await asyncio.wait_for(
+        execution_task = asyncio.create_task(
+            asyncio.wait_for(
                 execute_scan(scan_id, expected_worker=CONSUMER),
                 timeout=settings.SCAN_TOTAL_TIMEOUT_SECONDS,
             )
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {execution_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if heartbeat_task in done and lease_lost.is_set():
+                # The database/Redis lease is no longer owned by this worker.
+                # Stop network work immediately instead of allowing the old
+                # worker to continue alongside the recovered worker.
+                execution_task.cancel()
+                try:
+                    await execution_task
+                except asyncio.CancelledError:
+                    pass
+                await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
+                return
+
+            if heartbeat_task in done:
+                # Heartbeat exited unexpectedly without reporting lease loss.
+                # Treat that as an execution-ownership failure rather than
+                # continuing without a live lease.
+                execution_task.cancel()
+                try:
+                    await execution_task
+                except asyncio.CancelledError:
+                    pass
+                await retry_or_fail(client, message_id, scan_id, attempt, "Worker heartbeat stopped unexpectedly")
+                return
+
+            success = execution_task.result()
             async with SessionLocal() as db:
                 scan = await db.get(Scan, scan_id)
                 cancelled = bool(scan and scan.status == "cancelled")
@@ -172,6 +206,8 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             else:
                 await retry_or_fail(client, message_id, scan_id, attempt, "Scan execution failed")
         except asyncio.CancelledError:
+            execution_task.cancel()
+            await asyncio.gather(execution_task, return_exceptions=True)
             raise
         except asyncio.TimeoutError:
             await retry_or_fail(client, message_id, scan_id, attempt, f"Scan exceeded {settings.SCAN_TOTAL_TIMEOUT_SECONDS}s execution budget")
@@ -180,7 +216,8 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
             await retry_or_fail(client, message_id, scan_id, attempt, f"Worker error: {exc}")
         finally:
             stop.set()
-            await heartbeat_task
+            if not heartbeat_task.done():
+                await heartbeat_task
     finally:
         await release_slot(client, slot_key, slot_token)
 
