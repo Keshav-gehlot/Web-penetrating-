@@ -16,7 +16,7 @@ from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
 from ..security_scope import validate_target
 from .audit import record_audit
-from .findings import fingerprint_for
+from .findings import evidence_digest, fingerprint_for
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
@@ -31,7 +31,7 @@ def serialize_scan(scan: Scan) -> dict:
 
 
 def serialize_finding(finding: Finding) -> dict:
-    return {"id": finding.id, "module": finding.module, "title": finding.title, "severity": finding.severity, "status": finding.status, "fingerprint": finding.fingerprint, "cve": finding.cve, "cwe": finding.cwe, "cvss": finding.cvss, "assignee": finding.assignee, "description": finding.description, "remediation": finding.remediation, "evidence": finding.evidence, "confidence": finding.confidence}
+    return {"id": finding.id, "module": finding.module, "title": finding.title, "severity": finding.severity, "status": finding.status, "fingerprint": finding.fingerprint, "cve": finding.cve, "cwe": finding.cwe, "cvss": finding.cvss, "assignee": finding.assignee, "description": finding.description, "remediation": finding.remediation, "evidence": finding.evidence, "evidence_hash": finding.evidence_hash, "evidence_collected_at": finding.evidence_collected_at.isoformat() if finding.evidence_collected_at else None, "evidence_source": finding.evidence_source, "confidence": finding.confidence}
 
 
 def severity_rank(value: str) -> int:
@@ -98,10 +98,11 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                         existing.last_seen = datetime.now(timezone.utc)
                         continue
 
-                    finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=item.get("evidence", {}), confidence=float(item.get("confidence", 1.0)))
+                    evidence = item.get("evidence") or {}
+                    finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=evidence, evidence_hash=evidence_digest(evidence), evidence_source="scanner", confidence=float(item.get("confidence", 1.0)))
                     db.add(finding)
                     await db.flush()
-                    await _op("finding.created", f"Finding created: {finding.title}", workspace_id=scan.workspace_id, scan_id=scan.id, severity=finding.severity, metadata={"finding_id": finding.id, "module": finding.module, "severity": finding.severity})
+                    await _op("finding.created", f"Finding created: {finding.title}", workspace_id=scan.workspace_id, scan_id=scan.id, severity=finding.severity, metadata={"finding_id": finding.id, "module": finding.module, "severity": finding.severity, "evidence_hash": finding.evidence_hash})
                     await bus.publish(scan_id, {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(finding)})
 
                 await db.commit()
@@ -141,7 +142,7 @@ async def _finish_cancellation(db: AsyncSession, scan: Scan, scan_id: str) -> No
     scan.worker_id = None
     scan.lease_expires_at = None
     await db.commit()
-    await _op("scan.cancelled", "Scan execution cancelled", workspace_id=scan.workspace_id, scan_id=scan.id, severity="warning")
+    await _op("scan.cancelled", "Scan execution cancelled", workspace_id=scan.workspace_id, scan_id=scan_id, severity="warning")
     await bus.publish(scan_id, {"event": "scan.cancelled", "scan_id": scan_id})
 
 
