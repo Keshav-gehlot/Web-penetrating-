@@ -82,15 +82,22 @@ async def recover_stale_scans() -> int:
 
 async def retry_or_fail(client, message_id: str, scan_id: str, attempt: int, message: str) -> None:
     next_status = "queued" if attempt < MAX_ATTEMPTS else "failed"
-    if attempt < MAX_ATTEMPTS:
-        await enqueue_retry(scan_id, attempt + 1)
     async with SessionLocal() as db:
-        await db.execute(
+        result = await db.execute(
             update(Scan)
-            .where(Scan.id == scan_id)
+            .where(Scan.id == scan_id, Scan.worker_id == CONSUMER, Scan.status == "running")
             .values(status=next_status, error=message, worker_id=None, lease_expires_at=None)
         )
         await db.commit()
+
+    # If this worker no longer owns the scan, another worker has recovered it.
+    # Never overwrite the recovered worker's state or enqueue a duplicate retry.
+    if result.rowcount != 1:
+        await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
+        return
+
+    if attempt < MAX_ATTEMPTS:
+        await enqueue_retry(scan_id, attempt + 1)
     await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
 
 
@@ -117,8 +124,11 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
         if not await claim_scan(scan_id, attempt):
             async with SessionLocal() as db:
                 scan = await db.get(Scan, scan_id)
-                terminal = not scan or scan.status in {"completed", "failed", "cancelled"}
-            if terminal:
+                # A queued scan may belong to another valid message; a running
+                # scan is already being processed by another worker. In either
+                # case this duplicate message must not poison the consumer group.
+                terminal_or_active = not scan or scan.status in {"running", "completed", "failed", "cancelled", "queued"}
+            if terminal_or_active:
                 await client.xack(SCAN_STREAM, SCAN_GROUP, message_id)
             return
 
@@ -165,14 +175,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
 async def recover_stale_jobs(client) -> None:
     cursor = "0-0"
     while True:
-        result = await client.xautoclaim(
-            SCAN_STREAM,
-            SCAN_GROUP,
-            CONSUMER,
-            JOB_LEASE_SECONDS * 1000,
-            cursor,
-            count=50,
-        )
+        result = await client.xautoclaim(SCAN_STREAM, SCAN_GROUP, CONSUMER, JOB_LEASE_SECONDS * 1000, cursor, count=50)
         cursor, messages = result[0], result[1]
         for message_id, fields in messages:
             await process_message(client, message_id, fields)
@@ -185,13 +188,7 @@ async def main() -> None:
     await ensure_consumer_group(client)
     heartbeat_key = f"phantom:worker:heartbeat:{CONSUMER}"
     last_recovery = 0.0
-    log.info(
-        "PHANTOM worker started stream=%s group=%s consumer=%s max_concurrent=%s",
-        SCAN_STREAM,
-        SCAN_GROUP,
-        CONSUMER,
-        settings.MAX_CONCURRENT_SCANS,
-    )
+    log.info("PHANTOM worker started stream=%s group=%s consumer=%s max_concurrent=%s", SCAN_STREAM, SCAN_GROUP, CONSUMER, settings.MAX_CONCURRENT_SCANS)
     try:
         while True:
             now = time.time()
@@ -202,14 +199,7 @@ async def main() -> None:
                 if recovered:
                     log.warning("Recovered %s stale DB lease(s)", recovered)
                 last_recovery = now
-
-            batches = await client.xreadgroup(
-                SCAN_GROUP,
-                CONSUMER,
-                {SCAN_STREAM: ">"},
-                count=1,
-                block=5000,
-            )
+            batches = await client.xreadgroup(SCAN_GROUP, CONSUMER, {SCAN_STREAM: ">"}, count=1, block=5000)
             for _, messages in batches:
                 for message_id, fields in messages:
                     await process_message(client, message_id, fields)
