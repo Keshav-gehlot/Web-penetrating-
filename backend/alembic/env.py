@@ -27,9 +27,14 @@ def run_migrations_offline() -> None:
 
 async def run_migrations_online() -> None:
     connectable = async_engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=NullPool)
+
+    def run_sync_migrations(sync_connection) -> None:
+        context.configure(connection=sync_connection, target_metadata=target_metadata, compare_type=True)
+        with context.begin_transaction():
+            context.run_migrations()
+
     async with connectable.connect() as connection:
-        await connection.run_sync(lambda sync_connection: context.configure(connection=sync_connection, target_metadata=target_metadata, compare_type=True))
-        await connection.run_sync(lambda _: context.run_migrations())
+        await connection.run_sync(run_sync_migrations)
     await connectable.dispose()
 
 
