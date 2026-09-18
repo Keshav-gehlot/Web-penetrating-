@@ -43,6 +43,8 @@ async def login(payload:LoginRequest,request:Request,db:AsyncSession=Depends(get
         if user.failed_login_count>=MAX_FAILURES: user.locked_until=now+timedelta(minutes=LOCK_MINUTES); user.failed_login_count=0
         await record_audit(db,request,"auth.login_failed","user",user.id,{"email":email},actor=email); await db.commit(); raise HTTPException(401,"Invalid credentials")
     user.failed_login_count=0; user.locked_until=None
+    if user.mfa_enabled and (not payload.mfa_code or not verify_totp(user.mfa_secret or "", payload.mfa_code)):
+        await record_audit(db,request,"auth.mfa_failed","user",user.id,None,actor=email); await db.commit(); raise HTTPException(401,"MFA verification required")
     member=await db.scalar(select(WorkspaceMember).where(WorkspaceMember.user_id==user.id,WorkspaceMember.workspace_id==payload.workspace_id))
     if not member: await db.commit(); raise HTTPException(403,"User is not a member of this workspace")
     response=await _session_response(user,member,db,request); await record_audit(db,request,"auth.login","auth_session",response.user_id,{"workspace_id":member.workspace_id},actor=user.email); await db.commit(); return response
