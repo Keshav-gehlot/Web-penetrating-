@@ -42,3 +42,8 @@ async def test_runner_attaches_metrics_and_evidence(monkeypatch):
     assert result["metrics"]["requests"] == 0
     assert result["findings"][0]["evidence"]["schema_version"] == "1.0"
     assert result["findings"][0]["evidence"]["target"] == "https://example.com"
+
+
+def test_http_method_module_is_registered():
+    assert "http_methods" in modules.MODULES
+    assert "service_identification" in modules.MODULES
