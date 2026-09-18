@@ -31,7 +31,6 @@ async def run_module(
 ) -> dict:
     if name not in MODULES:
         raise KeyError(f"Unknown scanner module: {name}")
-    ensure_runtime(runtime_id or f"module:{name}:{target}", scope=scope)
     started = time.monotonic()
     runtime = ensure_runtime(runtime_id or f"module:{name}:{target}", scope=scope)
     request_before = runtime.requests
