@@ -16,6 +16,10 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+asyncpg://phantom:phantom@127.0.0.1:5432/phantom_ci
+      PHANTOM_AUTH_SECRET: ci-only-auth-secret
+      PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
     services:
       postgres:
         image: postgres:16
@@ -61,10 +65,6 @@ jobs:
           grep -q "asset_services" /tmp/phantom-schema.sql
           grep -q "asset_history" /tmp/phantom-schema.sql
       - name: Migration smoke test
-        env:
-          DATABASE_URL: postgresql+asyncpg://phantom:phantom@127.0.0.1:5432/phantom_ci
-          PHANTOM_AUTH_SECRET: ci-only-auth-secret
-          PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
         run: |
           cd backend
           alembic upgrade head
