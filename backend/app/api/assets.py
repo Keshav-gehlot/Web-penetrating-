@@ -169,6 +169,7 @@ async def create_asset(payload: AssetCreate, request: Request, principal: Princi
         tags=sorted({x.strip() for x in payload.tags if x.strip()})[:30], notes=payload.notes.strip(),
         status="active", last_seen_at=now, last_resolved_at=now if addresses else None)
     db.add(asset); await db.flush()
+    await _history(db, asset, "asset.created", {"host": asset.host})
     await record_audit(db, request, "asset.created", "asset", asset.id, {"host": asset.host, "scope_id": scope.get("id")}, principal)
     await db.commit()
     return await serialize(asset, db)
@@ -203,6 +204,7 @@ async def update_asset(asset_id: str, payload: AssetUpdate, request: Request,
     if "tags" in values: asset.tags = sorted({x.strip() for x in values["tags"] if x.strip()})[:30]
     if "notes" in values: asset.notes = values["notes"].strip()
     asset.last_seen_at = datetime.now(timezone.utc)
+    await _history(db, asset, "asset.updated", {"changed_fields": sorted(values)})
     await record_audit(db, request, "asset.updated", "asset", asset.id, {"host": asset.host, "changed_fields": sorted(values)}, principal)
     await db.commit()
     return await serialize(asset, db)
@@ -230,6 +232,7 @@ async def delete_asset(
     asset = await db.scalar(select(Asset).where(Asset.id == asset_id, Asset.workspace_id == principal.workspace_id))
     if not asset:
         raise HTTPException(404, "Asset not found")
+    await _history(db, asset, "asset.deleted", {"host": asset.host})
     await record_audit(db, request, "asset.deleted", "asset", asset.id, {"host": asset.host}, principal)
     await db.delete(asset)
     await db.commit()
