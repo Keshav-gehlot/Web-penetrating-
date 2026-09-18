@@ -58,7 +58,7 @@ jobs:
           cd backend
           alembic history --verbose
           alembic heads
-          test "$(alembic heads | grep -c '^0013_scope_approval')" -eq 1
+          test "$(alembic heads | grep -c '^0015_auth_hardening')" -eq 1
       - name: Migration upgrade / downgrade / re-upgrade
         run: |
           cd backend
