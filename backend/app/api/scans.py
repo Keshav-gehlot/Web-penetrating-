@@ -114,6 +114,9 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
         except ScopeViolation as exc:
             await _fail_for_scope(db, scan, str(exc))
             return False
+        if scope.get("approval_status") != "approved":
+            await _fail_for_scope(db, scan, "workspace scope is not approved")
+            return False
 
         scan.status = "running"
         scan.started_at = scan.started_at or datetime.now(timezone.utc)
