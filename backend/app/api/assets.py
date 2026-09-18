@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
 from ..database import get_db
-from ..models import Asset, AssetHistory, AssetService, Finding, Scan, WorkspaceScope
+from ..models import Asset, AssetHistory, AssetService, AssetTechnology, Finding, Scan, WorkspaceScope
 from ..rbac import require_permission
 from ..security_scope import ScopeViolation, normalize_target, scope_snapshot, validate_target, validate_target_against_scope
 from .audit import record_audit
@@ -97,8 +97,33 @@ async def ingest_scan_observations(db, scan: Scan, result: dict) -> None:
                 service_row.state, service_row.source_scan_id = 'closed', scan.id
     subdomains = result.get('subdomains', []) or []
     if subdomains: await _history(db, asset, 'discovery.subdomains', {'count': len(subdomains), 'hosts': [x.get('host') for x in subdomains[:100]]}, scan.id); changed = True
-    technologies = result.get('technologies', []) or []
-    if technologies: await _history(db, asset, 'discovery.technology', {'technologies': technologies[:100]}, scan.id); changed = True
+    technologies = result.get("technologies", []) or []
+    for tech in technologies[:100]:
+        product = str(tech.get("product") or tech.get("name") or "").strip()
+        if not product:
+            continue
+        version = tech.get("version")
+        existing = await db.scalar(select(AssetTechnology).where(
+            AssetTechnology.asset_id == asset.id,
+            AssetTechnology.product == product,
+            AssetTechnology.version == version,
+        ))
+        if existing:
+            existing.last_seen_at = now
+            existing.cpe = tech.get("cpe") or existing.cpe
+            existing.vendor = tech.get("vendor") or existing.vendor
+            existing.confidence = max(existing.confidence, float(tech.get("confidence", 0.0)))
+            existing.metadata_json = tech
+        else:
+            db.add(AssetTechnology(
+                id=str(uuid4()), asset_id=asset.id, vendor=tech.get("vendor"),
+                product=product, version=version, cpe=tech.get("cpe"),
+                source=tech.get("source", "scanner"), confidence=float(tech.get("confidence", 0.0)),
+                metadata_json=tech, first_seen_at=now, last_seen_at=now,
+            ))
+        changed = True
+    if technologies:
+        await _history(db, asset, "discovery.technology", {"technologies": technologies[:100]}, scan.id)
     if changed:
         asset.last_seen_at = now
         await _history(db, asset, 'discovery.updated', {'module': result.get('module'), 'ports': len(result.get('ports', []) or [])}, scan.id)
@@ -120,7 +145,15 @@ async def serialize(asset, db, include_scans=False):
         "last_seen_at": asset.last_seen_at.isoformat() if asset.last_seen_at else None,
         "last_resolved_at": asset.last_resolved_at.isoformat() if asset.last_resolved_at else None,
         "created_at": asset.created_at.isoformat() if asset.created_at else None,
+        "technologies": [],
     }
+    technologies_rows = (await db.scalars(select(AssetTechnology).where(AssetTechnology.asset_id == asset.id).order_by(AssetTechnology.product))).all()
+    result["technologies"] = [{
+        "vendor": t.vendor, "product": t.product, "version": t.version, "cpe": t.cpe,
+        "source": t.source, "confidence": t.confidence,
+        "first_seen_at": t.first_seen_at.isoformat() if t.first_seen_at else None,
+        "last_seen_at": t.last_seen_at.isoformat() if t.last_seen_at else None,
+    } for t in technologies_rows]
     services = (await db.scalars(select(AssetService).where(AssetService.asset_id == asset.id).order_by(AssetService.port))).all()
     result['services'] = [{'port': s.port, 'protocol': s.protocol, 'service': s.service, 'state': s.state, 'first_seen_at': s.first_seen_at.isoformat() if s.first_seen_at else None, 'last_seen_at': s.last_seen_at.isoformat() if s.last_seen_at else None} for s in services]
     if include_scans:
