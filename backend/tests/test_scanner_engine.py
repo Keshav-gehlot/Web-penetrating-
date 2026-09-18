@@ -42,3 +42,8 @@ async def test_runner_attaches_metrics_and_evidence(monkeypatch):
     assert result["metrics"]["requests"] == 0
     assert result["findings"][0]["evidence"]["schema_version"] == "1.0"
     assert result["findings"][0]["evidence"]["target"] == "https://example.com"
+
+
+def test_discovery_modules_have_safe_scope_wrappers():
+    assert callable(modules.MODULES["dns_recon"])
+    assert callable(modules.MODULES["redirect_inventory"])
