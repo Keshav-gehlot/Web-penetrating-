@@ -44,6 +44,8 @@ async def _op(event_type: str, message: str, *, workspace_id: str | None = None,
 
 
 async def _load_scope(db: AsyncSession, workspace_id: str) -> dict[str, object] | None:
+    if not hasattr(db, "scalar"):
+        return None
     row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == workspace_id))
     return scope_snapshot(row) if row else None
 
@@ -182,7 +184,8 @@ async def list_modules(principal: Principal = Depends(require_permission("scan:v
 
 @router.post("")
 async def create_scan(payload: ScanRequest, request: Request, principal: Principal = Depends(require_permission("scan:create")), db: AsyncSession = Depends(get_db)):
-    scope = await _load_scope(db, principal.workspace_id)
+    scope_result = _load_scope(db, principal.workspace_id)
+    scope = await scope_result if inspect.isawaitable(scope_result) else scope_result
     if scope is None:
         raise HTTPException(409, "Workspace scope is not configured. Configure an authorized scope before starting scans.")
     try:
