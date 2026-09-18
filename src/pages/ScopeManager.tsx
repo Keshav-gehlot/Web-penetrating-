@@ -11,7 +11,7 @@ const emptyScope: WorkspaceScope = {
   effective_limits: { max_requests: 250, max_concurrency: 1, max_redirects: 3 },
 };
 
-type Draft = Omit<WorkspaceScope, 'id' | 'workspace_id' | 'configured' | 'authorization_acknowledged_at' | 'acknowledged_by' | 'created_at' | 'updated_at' | 'effective_limits'>;
+type Draft = Omit<WorkspaceScope, 'id' | 'workspace_id' | 'configured' | 'authorization_acknowledged_at' | 'acknowledged_by' | 'created_at' | 'updated_at' | 'effective_limits'> & { authorization_reconfirmed: boolean };
 
 export default function ScopeManager() {
   const [scope, setScope] = useState<WorkspaceScope>(emptyScope);
@@ -53,7 +53,7 @@ export default function ScopeManager() {
         current.max_concurrency !== next.max_concurrency ||
         current.max_redirects !== next.max_redirects;
       return materialChanged && scope.configured
-        ? { ...next, authorization_acknowledged: false }
+        ? { ...next, authorization_acknowledged: false, authorization_reconfirmed: false }
         : next;
     });
     setCheckResult(null);
@@ -121,7 +121,7 @@ export default function ScopeManager() {
           <div className="rounded-lg border border-phantom-amber/25 bg-phantom-amber/5 p-3 text-xs text-phantom-text-secondary flex gap-3"><AlertTriangle size={15} className="text-phantom-amber shrink-0 mt-0.5"/><div><strong className="text-phantom-text-primary">Only add systems you are authorized to assess.</strong><div className="mt-1 leading-5">PHANTOM rejects local/private destinations and applies this workspace allowlist before a scan and before each outbound request.</div></div></div>
           <Field title="Authorized targets" hint="Hostname, wildcard subdomain, public IP, or public CIDR."><div className="flex gap-2"><input value={targetInput} onChange={e => setTargetInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && add('authorized_targets', targetInput, () => setTargetInput(''))} placeholder="example.com or *.example.com" className="control flex-1"/><button onClick={() => add('authorized_targets', targetInput, () => setTargetInput(''))} className="iconButton"><Plus size={15}/></button></div><Chips values={draft.authorized_targets} onRemove={x => remove('authorized_targets', x)} empty="No authorized targets yet."/></Field>
           <Field title="Excluded targets" hint="Exclusions override authorization, including wildcard and CIDR matches."><div className="flex gap-2"><input value={excludedInput} onChange={e => setExcludedInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && add('excluded_targets', excludedInput, () => setExcludedInput(''))} placeholder="admin.example.com" className="control flex-1"/><button onClick={() => add('excluded_targets', excludedInput, () => setExcludedInput(''))} className="iconButton"><Plus size={15}/></button></div><Chips values={draft.excluded_targets} onRemove={x => remove('excluded_targets', x)} empty="No exclusions."/></Field>
-          <label className="flex items-start gap-3 rounded-lg border border-phantom-border bg-phantom-panel p-3 cursor-pointer"><input type="checkbox" checked={draft.authorization_acknowledged} onChange={e => { setDraft(d => ({...d, authorization_acknowledged: e.target.checked})); setError(''); setMessage(''); }} className="mt-0.5 accent-cyan-400"/><span className="text-xs leading-5"><strong className="text-phantom-text-primary">I confirm this workspace has authorization to assess the configured targets.</strong><span className="block text-phantom-text-tertiary mt-0.5">Required before the scope can be enabled.</span></span></label>
+          <label className="flex items-start gap-3 rounded-lg border border-phantom-border bg-phantom-panel p-3 cursor-pointer"><input type="checkbox" checked={draft.authorization_acknowledged} onChange={e => { const checked = e.target.checked; setDraft(d => ({...d, authorization_acknowledged: checked, authorization_reconfirmed: checked ? true : false})); setError(''); setMessage(''); }} className="mt-0.5 accent-cyan-400"/><span className="text-xs leading-5"><strong className="text-phantom-text-primary">I confirm this workspace has authorization to assess the configured targets.</strong><span className="block text-phantom-text-tertiary mt-0.5">Required before the scope can be enabled.</span></span></label>
           <label className="flex items-center justify-between rounded-lg border border-phantom-border bg-phantom-panel p-3"><span><span className="text-xs font-medium">Enforce workspace scope</span><span className="block text-[11px] text-phantom-text-tertiary mt-1">When disabled, scans cannot execute.</span></span><button onClick={() => { setDraft(d => ({...d, enabled: !d.enabled})); setError(''); setMessage(''); }} className={`w-11 h-6 rounded-full p-1 transition ${draft.enabled ? 'bg-phantom-cyan/70' : 'bg-phantom-surface border border-phantom-border'}`} aria-label="Toggle scope enforcement"><span className={`block w-4 h-4 rounded-full bg-white transition-transform ${draft.enabled ? 'translate-x-5' : ''}`}/></button></label>
           {draft.enabled && !canEnable && <div className="text-[11px] text-phantom-coral">Scope cannot be enabled until authorization is acknowledged and at least one target is configured.</div>}
         </Panel>
@@ -167,7 +167,7 @@ function validateDraft(draft: Draft): string[] {
   return issues;
 }
 
-function toDraft(value: WorkspaceScope): Draft { return { enabled: value.enabled, authorized_targets: [...value.authorized_targets], excluded_targets: [...value.excluded_targets], allowed_ports: [...value.allowed_ports], allowed_paths: [...value.allowed_paths], blocked_paths: [...value.blocked_paths], max_requests: value.max_requests, max_concurrency: value.max_concurrency, max_redirects: value.max_redirects, authorization_acknowledged: value.authorization_acknowledged }; }
+function toDraft(value: WorkspaceScope): Draft { return { enabled: value.enabled, authorized_targets: [...value.authorized_targets], excluded_targets: [...value.excluded_targets], allowed_ports: [...value.allowed_ports], allowed_paths: [...value.allowed_paths], blocked_paths: [...value.blocked_paths], max_requests: value.max_requests, max_concurrency: value.max_concurrency, max_redirects: value.max_redirects, authorization_acknowledged: value.authorization_acknowledged, authorization_reconfirmed: false }; }
 function unique(values: string[]) { return [...new Set(values)]; }
 function uniqueNumbers(values: number[]) { return [...new Set(values)]; }
 function errorText(error: unknown, fallback: string) { if (error instanceof Error) return error.message; return fallback; }
