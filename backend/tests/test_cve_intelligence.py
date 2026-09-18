@@ -20,3 +20,8 @@ def test_unversioned_fingerprint_does_not_invent_cpe():
     assert result is not None
     assert result["version"] is None
     assert result["cpe"] is None
+
+
+def test_versioned_cpe_shape_is_deterministic():
+    result = fingerprint_from_header("x-powered-by", "PHP/8.2.12")
+    assert result["cpe"].startswith("cpe:2.3:a:php:php:8.2.12:")
