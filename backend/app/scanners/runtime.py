@@ -157,3 +157,19 @@ async def bounded_snapshot(target: str) -> httpx.Response:
 def bounded_connect(host: str, port: int) -> None:
     sock = scoped_tcp_socket(host, port)
     sock.close()
+
+
+async def bounded_options(target: str) -> httpx.Response:
+    _consume_request()
+    url = target
+    _assert_scope_url(url)
+    _assert_public_host(url)
+    async with httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS),
+        headers={"User-Agent": "PHANTOM/2.0 authorized-security-assessment"},
+    ) as client:
+        response = await client.options(url)
+    if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
+        raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit")
+    return response
