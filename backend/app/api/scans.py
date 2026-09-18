@@ -102,12 +102,13 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                 await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
                 result = await run_module(module_name, scan.target, runtime_id=scan.id, scope=scope)
                 result_status = str(result.get("status", "ok"))
-                await ingest_scan_observations(db, scan, result)
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
                     await _op("module.failed", f"Scanner module failed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, severity="error", metadata={"module": module_name, "status": result_status, "error": error})
                     await bus.publish(scan_id, {"event": "module.failed", "scan_id": scan_id, "module": module_name, "index": index, "total": total, "status": result_status, "error": error})
                     raise RuntimeError(f"Module {module_name} {result_status}: {error}")
+
+                await ingest_scan_observations(db, scan, result)
 
                 seen: set[str] = set()
                 for item in result.get("findings", []):
