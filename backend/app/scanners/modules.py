@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-from .runtime import bounded_connect, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket
+from .runtime import bounded_connect, bounded_dns_records, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket
 from ..security_scope import scope_host_allowed
 from ..intelligence.cve import enrich_cpe, fingerprint_from_header
 
@@ -122,26 +122,12 @@ async def dns_recon(target):
     host = urlparse(target).hostname
     if not host:
         return base("dns_recon", host=None, records=[])
-    records = []
     try:
-        import dns.resolver
-        resolver = dns.resolver.Resolver()
-        resolver.timeout = 2
-        resolver.lifetime = 3
-        for rtype in ("A", "AAAA", "CNAME", "MX", "NS", "TXT"):
-            try:
-                answers = resolver.resolve(host, rtype, raise_on_no_answer=False)
-                for answer in answers:
-                    records.append({"type": rtype, "value": str(answer).strip().rstrip(".")})
-            except Exception:
-                continue
-    except ImportError:
-        for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
-            if family in (socket.AF_INET, socket.AF_INET6):
-                records.append({"type": "A" if family == socket.AF_INET else "AAAA", "value": sockaddr[0]})
+        records = bounded_dns_records(host)
+    except (OSError, RuntimeError):
+        records = []
     unique = [dict(x) for x in {tuple(sorted(r.items())) for r in records}]
     return base("dns_recon", host=host, records=sorted(unique, key=lambda x: (x["type"], x["value"])))
-
 async def cve_lookup(target):
     r = await http_snapshot(target)
     fingerprints = []
