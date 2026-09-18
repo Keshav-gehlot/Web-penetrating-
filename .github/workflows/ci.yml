@@ -40,6 +40,19 @@ jobs:
           cd backend
           alembic upgrade head --sql > /tmp/phantom-schema.sql
           grep -q "workspace_scopes" /tmp/phantom-schema.sql
+          grep -q "asset_services" /tmp/phantom-schema.sql
+          grep -q "asset_history" /tmp/phantom-schema.sql
+      - name: Migration smoke test
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./phantom-ci.db
+          PHANTOM_AUTH_SECRET: ci-only-auth-secret
+          PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
+        run: |
+          cd backend
+          alembic upgrade head
+          alembic downgrade 0011_asset_inventory
+          alembic upgrade head
+          test -f ../phantom-ci.db
       - name: Run backend unit tests
         run: |
           cd backend
