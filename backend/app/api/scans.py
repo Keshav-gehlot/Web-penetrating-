@@ -171,7 +171,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), product=item.get("product"), version=item.get("version"), cpe=item.get("cpe"), cvss_v3_score=item.get("cvss_v3_score"), cvss_v3_vector=item.get("cvss_v3_vector"), cvss_v3_severity=item.get("cvss_v3_severity"), cvss_v4_score=item.get("cvss_v4_score"), cvss_v4_vector=item.get("cvss_v4_vector"), cvss_v4_severity=item.get("cvss_v4_severity"), cve_published_at=_parse_dt(item.get("published")), cve_modified_at=_parse_dt(item.get("modified")), cve_affected_versions=item.get("affected_versions", []), cve_references=item.get("references", []), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=evidence, evidence_hash=evidence_digest(evidence), evidence_source="NVD" if item.get("cve") else "scanner", confidence=float(item.get("confidence", 1.0)))
                     db.add(finding)
                     if item.get("cve"):
-                        cached = await db.scalar(select(CVEIntelligence).where(CVEIntelligence.cve == item["cve"]))
+                        cached = await db.scalar(select(CVEIntelligence).where(CVEIntelligence.cve == item["cve"], CVEIntelligence.cpe == (item.get("cpe") or ""), CVEIntelligence.version == (item.get("version") or "")))
                         v3 = item.get("cvss_v3") or {}
                         v4 = item.get("cvss_v4") or {}
                         values = {
