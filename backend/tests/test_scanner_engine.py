@@ -45,5 +45,5 @@ async def test_runner_attaches_metrics_and_evidence(monkeypatch):
 
 
 def test_discovery_modules_have_safe_scope_wrappers():
-    assert callable(modules.MODULES["dns_recon"])
+    assert callable(modules.MODULES["dns_recon"])\n    assert callable(modules.MODULES["http_methods"])
     assert callable(modules.MODULES["redirect_inventory"])
