@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -9,7 +10,7 @@ from app.main import app
 from app.models import Asset, Finding, Organization, Scan, Workspace
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def api_db():
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -35,7 +36,7 @@ async def api_db():
     await engine.dispose()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(api_db):
     principal = Principal(actor="user-a", user_id="user-a", workspace_id="workspace-a", role="owner")
     async def override_db():
