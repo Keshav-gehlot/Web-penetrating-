@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import base64, struct, time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -31,6 +32,14 @@ class LoginRequest(BaseModel):
     workspace_id: str = Field(default="default", min_length=1, max_length=100)
 
 
+def new_totp_secret()->str: return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+def verify_totp(secret:str,code:str,window:int=1)->bool:
+    try: raw=base64.b32decode(secret+"="*((8-len(secret)%8)%8),casefold=True); value=int(code)
+    except (ValueError,TypeError): return False
+    for offset in range(-window,window+1):
+        counter=int(time.time()//30)+offset; msg=struct.pack(">Q",counter); digest=hmac.new(raw,msg,hashlib.sha1).digest(); pos=digest[-1]&15; otp=(struct.unpack(">I",digest[pos:pos+4])[0]&0x7fffffff)%1000000
+        if hmac.compare_digest(f"{otp:06d}",f"{value:06d}"): return True
+    return False
 def _sign(payload: str) -> str:
     return hmac.new(settings.AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
