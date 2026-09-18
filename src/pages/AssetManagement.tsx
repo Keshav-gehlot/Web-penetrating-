@@ -9,7 +9,7 @@ type Asset = {
   criticality: string; owner: string | null; tags: string[]; notes: string; status: string;
   risk: string; finding_count: number; scan_count: number; last_scan: string | null;
   last_scan_status: string | null; last_seen_at: string | null; last_resolved_at: string | null;
-  created_at: string | null;
+  created_at: string | null; services?: {port:number;protocol:string;service:string|null;state:string;last_seen_at:string|null}[]; history?: {id:string;event_type:string;scan_id:string|null;metadata:Record<string,unknown>;created_at:string|null}[];
 };
 type Form = Pick<Asset, 'target'|'type'|'environment'|'criticality'|'owner'|'tags'|'notes'|'status'>;
 
@@ -17,6 +17,7 @@ const emptyForm: Form = { target: '', type: 'web', environment: 'unknown', criti
 
 export default function AssetManagement() {
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [environment, setEnvironment] = useState('all');
   const [criticality, setCriticality] = useState('all');
@@ -70,6 +71,9 @@ export default function AssetManagement() {
     finally { setSaving(false); }
   };
 
+  const bulk = async (action: 'activate'|'deactivate'|'delete') => { if (!selectedIds.length) return; if (action === 'delete' && !window.confirm(`Delete ${selectedIds.length} selected assets? Historical scans remain preserved.`)) return; const r = await fetch(`${API}/api/v1/assets/bulk`, { method:'POST', headers:{'Content-Type':'application/json',...authHeaders()}, body:JSON.stringify({asset_ids:selectedIds,action}) }); if(!r.ok){setError(await r.text());return;} setSelectedIds([]); await load(); };
+  const exportInventory = async () => { const r=await fetch(`${API}/api/v1/assets/export.csv`,{headers:authHeaders()}); if(!r.ok){setError(await r.text());return;} const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='phantom-assets.csv'; a.click(); URL.revokeObjectURL(url); };
+
   const remove = async (asset: Asset) => {
     if (!window.confirm(`Delete ${asset.host} from the workspace inventory? Historical scans will be preserved.`)) return;
     const r = await fetch(`${API}/api/v1/assets/${encodeURIComponent(asset.id)}`, { method: 'DELETE', headers: authHeaders() });
@@ -103,7 +107,7 @@ export default function AssetManagement() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-5">
         <Metric label="Inventory" value={counts.total} icon={Globe2}/><Metric label="Criticality: critical" value={counts.critical} icon={ShieldAlert}/><Metric label="High / critical risk" value={counts.exposed} icon={ShieldAlert}/><Metric label="Scanned" value={counts.scanned} icon={CheckCircle2}/>
       </div>
-      <div className="flex flex-wrap items-center gap-2 mt-4">
+      <div className="flex flex-wrap items-center gap-2 mt-4"><button onClick={()=>void exportInventory()} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Export CSV</button>{selectedIds.length>0&&<><button onClick={()=>void bulk("activate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Activate ({selectedIds.length})</button><button onClick={()=>void bulk("deactivate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Deactivate</button><button onClick={()=>void bulk("delete")} className="h-9 px-3 border border-phantom-coral/30 text-phantom-coral rounded-lg text-xs">Delete</button></>}</div><div className="flex flex-wrap items-center gap-2 mt-2">
         <div className="relative flex-1 min-w-[220px] max-w-lg"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-phantom-text-tertiary" size={14}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search host, target, or owner…" className="w-full h-9 bg-phantom-panel border border-phantom-border rounded-lg pl-9 pr-3 text-xs outline-none focus:border-phantom-cyan"/></div>
         <Select value={status} onChange={setStatus} options={['all','active','inactive']} label="Status"/><Select value={environment} onChange={setEnvironment} options={['all','production','staging','development','internal','unknown']} label="Environment"/><Select value={criticality} onChange={setCriticality} options={['all','critical','high','medium','low']} label="Criticality"/>
         <span className="h-9 px-3 border border-phantom-border rounded-lg flex items-center gap-2 text-[11px] text-phantom-text-tertiary"><Filter size={13}/>{assets.length} shown</span>
@@ -114,14 +118,14 @@ export default function AssetManagement() {
     <main className="flex-1 overflow-auto p-6">
       <div className="border border-phantom-border rounded-xl bg-phantom-surface overflow-hidden">
         <table className="w-full text-left">
-          <thead><tr className="border-b border-phantom-border bg-phantom-panel/50">
+          <thead><tr className="border-b border-phantom-border bg-phantom-panel/50"><th className="px-4 py-3"><input type="checkbox" aria-label="Select all visible assets" checked={assets.length>0&&selectedIds.length===assets.length} onChange={e=>setSelectedIds(e.target.checked?assets.map(a=>a.id):[])}/></th>
             {['Asset','Classification','Exposure','Risk','Activity',''].map((h,i)=><th key={i} className="px-4 py-3 text-[10px] uppercase tracking-wider text-phantom-text-tertiary">{h}</th>)}
           </tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={6} className="p-12 text-center text-sm text-phantom-text-tertiary">Loading inventory…</td></tr> :
+            {loading ? <tr><td colSpan={7} className="p-12 text-center text-sm text-phantom-text-tertiary">Loading inventory…</td></tr> :
             assets.length === 0 ? <tr><td colSpan={6} className="p-12 text-center"><Archive size={22} className="mx-auto text-phantom-text-tertiary"/><div className="mt-3 text-sm">No assets match the current filters.</div><div className="mt-1 text-xs text-phantom-text-tertiary">Add an authorized target or adjust the filters.</div></td></tr> :
             assets.map(a => <tr key={a.id} className="border-b border-phantom-border last:border-0 hover:bg-phantom-panel-hover">
-              <td className="px-4 py-3 min-w-[260px]"><button onClick={() => setSelected(a)} className="text-sm font-medium hover:text-phantom-cyan">{a.host}</button><div className="text-[10px] text-phantom-text-tertiary font-mono mt-1 truncate max-w-[320px]">{a.target}</div><div className="flex gap-1 mt-2">{a.tags.slice(0,3).map(t=><span key={t} className="text-[9px] px-1.5 py-0.5 rounded border border-phantom-border bg-phantom-panel">{t}</span>)}</div></td>
+              <td className="px-4 py-3"><input type="checkbox" aria-label={`Select ${a.host}`} checked={selectedIds.includes(a.id)} onChange={e=>setSelectedIds(v=>e.target.checked?[...new Set([...v,a.id])]:v.filter(id=>id!==a.id))}/></td><td className="px-4 py-3 min-w-[260px]"><button onClick={() => setSelected(a)} className="text-sm font-medium hover:text-phantom-cyan">{a.host}</button><div className="text-[10px] text-phantom-text-tertiary font-mono mt-1 truncate max-w-[320px]">{a.target}</div><div className="flex gap-1 mt-2">{a.tags.slice(0,3).map(t=><span key={t} className="text-[9px] px-1.5 py-0.5 rounded border border-phantom-border bg-phantom-panel">{t}</span>)}</div></td>
               <td className="px-4 py-3"><div className="text-xs">{a.environment}</div><div className="text-[10px] text-phantom-text-tertiary mt-1">{a.type} · {a.criticality}</div></td>
               <td className="px-4 py-3"><div className="font-mono text-xs">{a.addresses[0] ?? 'unresolved'}</div><div className="text-[10px] text-phantom-text-tertiary mt-1">{a.addresses.length} address{a.addresses.length === 1 ? '' : 'es'}</div></td>
               <td className="px-4 py-3"><RiskBadge risk={a.risk}/></td>
@@ -136,7 +140,7 @@ export default function AssetManagement() {
     {selected && <aside className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-phantom-surface border-l border-phantom-border shadow-2xl z-30 overflow-auto"><div className="p-5 border-b border-phantom-border flex items-start justify-between"><div><div className="text-[10px] font-mono uppercase tracking-wider text-phantom-cyan">Asset detail</div><h2 className="text-lg font-semibold mt-1">{selected.host}</h2><div className="text-[11px] font-mono text-phantom-text-tertiary mt-1 break-all">{selected.target}</div></div><button onClick={() => setSelected(null)} className="p-2 text-phantom-text-tertiary hover:text-phantom-text-primary"><X size={16}/></button></div>
       <div className="p-5 space-y-5"><div className="grid grid-cols-2 gap-2"><Detail label="Status" value={selected.status}/><Detail label="Environment" value={selected.environment}/><Detail label="Type" value={selected.type}/><Detail label="Criticality" value={selected.criticality}/><Detail label="Risk" value={selected.risk}/><Detail label="Owner" value={selected.owner ?? 'Unassigned'}/></div>
         <div><Label text="Resolved addresses"/><div className="mt-2 space-y-1">{selected.addresses.length ? selected.addresses.map(ip=><div key={ip} className="font-mono text-xs rounded border border-phantom-border bg-phantom-panel px-3 py-2">{ip}</div>) : <div className="text-xs text-phantom-text-tertiary">No public address resolved.</div>}</div>
-        <div><Label text="Tags"/><div className="flex flex-wrap gap-1.5 mt-2">{selected.tags.length ? selected.tags.map(t=><span key={t} className="text-[10px] px-2 py-1 rounded border border-phantom-border bg-phantom-panel">{t}</span>) : <span className="text-xs text-phantom-text-tertiary">No tags.</span>}</div></div>
+        <div><Label text="Observed services"/><div className="mt-2 space-y-1">{selected.services?.length ? selected.services.map(s=><div key={`${s.protocol}-${s.port}`} className="flex items-center justify-between rounded border border-phantom-border bg-phantom-panel px-3 py-2 text-xs"><span className="font-mono">{s.port}/{s.protocol}</span><span className="text-phantom-text-secondary">{s.service ?? 'unknown'} · {s.state}</span></div>) : <span className="text-xs text-phantom-text-tertiary">No discovered services yet.</span>}</div></div><div><Label text="Asset activity"/><div className="mt-2 space-y-2">{selected.history?.slice(0,8).map(h=><div key={h.id} className="text-xs"><span className="font-mono text-phantom-cyan">{h.event_type}</span><span className="text-phantom-text-tertiary ml-2">{formatDate(h.created_at)}</span></div>)}</div></div><div><Label text="Tags"/><div className="flex flex-wrap gap-1.5 mt-2">{selected.tags.length ? selected.tags.map(t=><span key={t} className="text-[10px] px-2 py-1 rounded border border-phantom-border bg-phantom-panel">{t}</span>) : <span className="text-xs text-phantom-text-tertiary">No tags.</span>}</div></div>
         <div><Label text="Notes"/><p className="text-xs text-phantom-text-secondary mt-2 whitespace-pre-wrap">{selected.notes || 'No notes recorded.'}</p></div>
         <div className="grid grid-cols-2 gap-2"><Detail label="Findings" value={String(selected.finding_count)}/><Detail label="Scans" value={String(selected.scan_count)}/><Detail label="Last seen" value={formatDate(selected.last_seen_at)}/><Detail label="Last resolved" value={formatDate(selected.last_resolved_at)}/></div>
         <div className="flex flex-wrap gap-2"><button onClick={() => nav(`/scans?target=${encodeURIComponent(selected.target)}`)} className="h-9 px-3 rounded-lg bg-phantom-text-primary text-black text-xs font-semibold">Start assessment</button><button onClick={() => void resolve(selected)} className="h-9 px-3 rounded-lg border border-phantom-border text-xs flex items-center gap-2"><RefreshCw size={13}/>Resolve DNS</button><button onClick={() => openEdit(selected)} className="h-9 px-3 rounded-lg border border-phantom-border text-xs flex items-center gap-2"><Pencil size={13}/>Edit</button></div>
