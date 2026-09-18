@@ -140,6 +140,115 @@ async def list_assets(principal: Principal = Depends(require_permission("scan:vi
     return [await serialize(a, db) for a in rows.all()]
 
 
+
+@router.post("/import")
+async def import_assets(payload: dict, request: Request, principal: Principal = Depends(require_permission("workspace:manage")), db: AsyncSession = Depends(get_db)):
+    rows = payload.get("assets")
+    if not isinstance(rows, list) or len(rows) > 250:
+        raise HTTPException(400, "assets must be a list containing at most 250 records")
+    scope_row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == principal.workspace_id))
+    if scope_row is None: raise HTTPException(409, "Workspace scope is not configured.")
+    scope = scope_snapshot(scope_row)
+    created = updated = skipped = 0
+    for raw in rows:
+        if not isinstance(raw, dict) or not raw.get("target"): skipped += 1; continue
+        try:
+            normalized = normalize_target(str(raw["target"]))
+            validate_target_against_scope(normalized, scope)
+            target = validate_target(normalized)
+            asset_type = str(raw.get("asset_type", "web")); environment = str(raw.get("environment", "unknown"))
+            criticality = str(raw.get("criticality", "medium")); status = str(raw.get("status", "active"))
+            _validate_metadata(asset_type, environment, criticality, status)
+        except (ScopeViolation, ValueError, HTTPException):
+            skipped += 1; continue
+        asset = await db.scalar(select(Asset).where(Asset.workspace_id == principal.workspace_id, Asset.host == target["host"]))
+        if asset:
+            asset.target = target["target"]; asset.last_seen_at = datetime.now(timezone.utc); updated += 1
+            await _history(db, asset, "asset.imported", {"mode": "updated"})
+        else:
+            now = datetime.now(timezone.utc)
+            asset = Asset(id=str(uuid4()), host=target["host"], target=target["target"], workspace_id=principal.workspace_id,
+                addresses=public_addresses(target["host"]), asset_type=asset_type, environment=environment,
+                criticality=criticality, owner=raw.get("owner"), tags=sorted({str(x).strip() for x in raw.get("tags", []) if str(x).strip()})[:30],
+                notes=str(raw.get("notes", "")).strip(), status=status, last_seen_at=now)
+            db.add(asset); await db.flush(); await _history(db, asset, "asset.imported", {"mode": "created"}); created += 1
+    await record_audit(db, request, "asset.imported", "asset_inventory", None, {"created": created, "updated": updated, "skipped": skipped}, principal)
+    await db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped, "processed": len(rows)}
+
+
+@router.post("/import.csv")
+async def import_assets_csv(request: Request, csv_text: str = Body(..., media_type="text/csv"), principal: Principal = Depends(require_permission("workspace:manage")), db: AsyncSession = Depends(get_db)):
+    import csv, io
+    try:
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+    except csv.Error as exc:
+        raise HTTPException(400, f"Invalid CSV: {exc}") from exc
+    assets = []
+    for row in rows:
+        assets.append({"target": row.get("target") or row.get("host"), "asset_type": row.get("type", "web"),
+                       "environment": row.get("environment", "unknown"), "criticality": row.get("criticality", "medium"),
+                       "owner": row.get("owner") or None, "status": row.get("status", "active"),
+                       "tags": [x for x in (row.get("tags") or "").split("|") if x], "notes": row.get("notes", "")})
+    return await import_assets({"assets": assets}, request, principal, db)
+
+
+@router.get("/export.csv")
+async def export_assets(request: Request, principal: Principal = Depends(require_permission("scan:view")), db: AsyncSession = Depends(get_db)):
+    import csv, io
+    rows = (await db.scalars(select(Asset).where(Asset.workspace_id == principal.workspace_id).order_by(Asset.host))).all()
+    out = io.StringIO(); writer = csv.writer(out)
+    writer.writerow(["id", "host", "target", "type", "environment", "criticality", "owner", "status", "tags", "addresses"])
+    for a in rows:
+        writer.writerow([a.id, a.host, a.target, a.asset_type, a.environment, a.criticality, a.owner or "", a.status, "|".join(a.tags or []), "|".join(a.addresses or [])])
+    await record_audit(db, request, "asset.exported", "asset_inventory", None, {"count": len(rows)}, principal); await db.commit()
+    return Response(content=out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=phantom-assets.csv"})
+
+
+@router.post("/bulk")
+async def bulk_assets(payload: dict, request: Request, principal: Principal = Depends(require_permission("workspace:manage")), db: AsyncSession = Depends(get_db)):
+    ids = list(dict.fromkeys(str(x) for x in payload.get("asset_ids", [])))[:250]
+    action = str(payload.get("action", ""))
+    if not ids or action not in {"activate", "deactivate", "delete"}: raise HTTPException(400, "Provide asset_ids and action: activate, deactivate, or delete")
+    rows = (await db.scalars(select(Asset).where(Asset.workspace_id == principal.workspace_id, Asset.id.in_(ids)))).all()
+    if len(rows) != len(ids): raise HTTPException(404, "One or more assets were not found in this workspace")
+    for asset in rows:
+        if action == "delete":
+            await _history(db, asset, "asset.deleted", {"host": asset.host, "bulk": True}); await record_audit(db, request, "asset.deleted", "asset", asset.id, {"host": asset.host, "bulk": True}, principal); await db.delete(asset)
+        else:
+            asset.status = "active" if action == "activate" else "inactive"
+            await _history(db, asset, "lifecycle.changed", {"status": asset.status, "bulk": True})
+            await record_audit(db, request, "asset.updated", "asset", asset.id, {"status": asset.status, "bulk": True}, principal)
+    await db.commit()
+    return {"updated": len(rows), "action": action}
+
+
+@router.get("/{asset_id}/findings")
+async def asset_findings(asset_id: str, principal: Principal = Depends(require_permission("finding:view")), db: AsyncSession = Depends(get_db)):
+    asset = await db.scalar(select(Asset).where(Asset.id == asset_id, Asset.workspace_id == principal.workspace_id))
+    if not asset: raise HTTPException(404, "Asset not found")
+    rows = (await db.scalars(select(Finding).join(Scan).where(Scan.asset_id == asset.id, Scan.workspace_id == principal.workspace_id).order_by(Finding.last_seen.desc()).limit(500))).all()
+    return [{"id": f.id, "scan_id": f.scan_id, "module": f.module, "title": f.title, "severity": f.severity, "status": f.status,
+             "fingerprint": f.fingerprint, "cve": f.cve, "cwe": f.cwe, "cvss": f.cvss, "confidence": f.confidence,
+             "first_seen": f.first_seen.isoformat() if f.first_seen else None, "last_seen": f.last_seen.isoformat() if f.last_seen else None} for f in rows]
+
+
+@router.get("/{asset_id}/history")
+async def asset_history(asset_id: str, principal: Principal = Depends(require_permission("scan:view")), db: AsyncSession = Depends(get_db)):
+    asset = await db.scalar(select(Asset).where(Asset.id == asset_id, Asset.workspace_id == principal.workspace_id))
+    if not asset: raise HTTPException(404, "Asset not found")
+    rows = (await db.scalars(select(AssetHistory).where(AssetHistory.asset_id == asset.id, AssetHistory.workspace_id == principal.workspace_id).order_by(AssetHistory.created_at.desc()).limit(250))).all()
+    return [{"id": h.id, "event_type": h.event_type, "scan_id": h.scan_id, "metadata": h.metadata_json, "created_at": h.created_at.isoformat() if h.created_at else None} for h in rows]
+
+
+@router.get("/{asset_id}/services")
+async def asset_services(asset_id: str, principal: Principal = Depends(require_permission("scan:view")), db: AsyncSession = Depends(get_db)):
+    asset = await db.scalar(select(Asset).where(Asset.id == asset_id, Asset.workspace_id == principal.workspace_id))
+    if not asset: raise HTTPException(404, "Asset not found")
+    rows = (await db.scalars(select(AssetService).where(AssetService.asset_id == asset.id).order_by(AssetService.port))).all()
+    return [{"id": s.id, "port": s.port, "protocol": s.protocol, "service": s.service, "state": s.state,
+             "first_seen_at": s.first_seen_at.isoformat() if s.first_seen_at else None, "last_seen_at": s.last_seen_at.isoformat() if s.last_seen_at else None} for s in rows]
+
 @router.get("/{asset_id}")
 async def get_asset(asset_id: str, principal: Principal = Depends(require_permission("scan:view")), db: AsyncSession = Depends(get_db)):
     asset = await db.scalar(select(Asset).where(Asset.id == asset_id, Asset.workspace_id == principal.workspace_id))
