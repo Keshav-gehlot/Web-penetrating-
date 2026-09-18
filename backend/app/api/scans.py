@@ -67,7 +67,8 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
         if not scan or (expected_worker and scan.worker_id != expected_worker):
             return False
 
-        scope = await _load_scope(db, scan.workspace_id) if scan.workspace_id else None
+        scope_result = _load_scope(db, scan.workspace_id) if scan.workspace_id else None
+        scope = await scope_result if inspect.isawaitable(scope_result) else scope_result
         if scope is None:
             await _fail_for_scope(db, scan, "workspace scope is not configured")
             return False
@@ -221,7 +222,8 @@ async def run_scan(scan_id: str, request: Request, principal: Principal = Depend
         raise HTTPException(409, "Scan is already queued or running")
     if scan.status == "cancelled":
         raise HTTPException(409, "Cancelled scans cannot be restarted")
-    scope = await _load_scope(db, principal.workspace_id)
+    scope_result = _load_scope(db, principal.workspace_id)
+    scope = await scope_result if inspect.isawaitable(scope_result) else scope_result
     if scope is None:
         raise HTTPException(409, "Workspace scope is not configured")
     try:
