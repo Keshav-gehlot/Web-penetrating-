@@ -37,7 +37,7 @@ async def api_db():
 
 @pytest.fixture
 async def client(api_db):
-    principal = Principal(user_id="user-a", workspace_id="workspace-a", role="owner", email="a@example.com")
+    principal = Principal(actor="user-a", user_id="user-a", workspace_id="workspace-a", role="owner")
     async def override_db():
         yield api_db
     app.dependency_overrides[get_db] = override_db
