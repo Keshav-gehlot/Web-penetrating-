@@ -5,7 +5,7 @@ import time
 
 from . import modules as scanner_modules
 from .modules import MODULES, PROFILES
-from .runtime import bounded_get, bounded_snapshot, ensure_runtime
+from .runtime import bounded_get, bounded_options, bounded_snapshot, ensure_runtime
 from .trust_audit import web_trust_audit
 from ..config import settings
 
@@ -13,6 +13,7 @@ MODULES.setdefault("web_trust_audit", web_trust_audit)
 PROFILES.setdefault("trust", ["web_trust_audit"])
 scanner_modules.get = bounded_get
 scanner_modules.http_snapshot = bounded_snapshot
+scanner_modules.bounded_options = bounded_options
 
 
 def json_safe(value):
