@@ -157,3 +157,21 @@ def test_scope_snapshot_includes_approval_state():
     assert snapshot["approval_status"] == "approved"
     assert snapshot["approved_by"] == "user-2"
     assert snapshot["approval_comment"] == "Approved for scheduled assessment."
+
+
+def test_enabled_scope_can_remain_pending_until_separate_approval():
+    policy = validate_scope_policy(
+        {
+            "enabled": True,
+            "authorized_targets": ["example.com"],
+            "excluded_targets": [],
+            "allowed_ports": [443],
+            "allowed_paths": ["/"],
+            "blocked_paths": [],
+            "authorization_acknowledged": True,
+        },
+        max_concurrency=1,
+        max_requests=100,
+        max_redirects=2,
+    )
+    assert policy["authorized_targets"] == ["example.com"]

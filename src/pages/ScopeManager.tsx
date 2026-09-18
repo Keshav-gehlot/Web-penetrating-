@@ -6,12 +6,13 @@ const emptyScope: WorkspaceScope = {
   id: null, workspace_id: null, configured: false, enabled: false,
   authorized_targets: [], excluded_targets: [], allowed_ports: [80, 443], allowed_paths: ['/'], blocked_paths: [],
   max_requests: 250, max_concurrency: 1, max_redirects: 3,
+  approval_status: 'pending', approved_at: null, approved_by: null, approval_comment: null,
   authorization_acknowledged: false, authorization_acknowledged_at: null, acknowledged_by: null,
   created_at: null, updated_at: null,
   effective_limits: { max_requests: 250, max_concurrency: 1, max_redirects: 3 },
 };
 
-type Draft = Omit<WorkspaceScope, 'id' | 'workspace_id' | 'configured' | 'authorization_acknowledged_at' | 'acknowledged_by' | 'created_at' | 'updated_at' | 'effective_limits'> & { authorization_reconfirmed: boolean };
+type Draft = Omit<WorkspaceScope, 'id' | 'workspace_id' | 'configured' | 'authorization_acknowledged_at' | 'acknowledged_by' | 'created_at' | 'updated_at' | 'effective_limits' | 'approval_status' | 'approved_at' | 'approved_by' | 'approval_comment'> & { authorization_reconfirmed: boolean };
 
 export default function ScopeManager() {
   const [scope, setScope] = useState<WorkspaceScope>(emptyScope);
