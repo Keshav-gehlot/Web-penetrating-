@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, CheckCircle2, Filter, Globe2, Pencil, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
 import { authHeaders } from '../lib/auth';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useRBAC } from '../lib/RBACProvider';
 
 const API = (import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 type Asset = {
@@ -16,6 +17,7 @@ type Form = Pick<Asset, 'target'|'type'|'environment'|'criticality'|'owner'|'tag
 const emptyForm: Form = { target: '', type: 'web', environment: 'unknown', criticality: 'medium', owner: '', tags: [], notes: '', status: 'active' };
 
 export default function AssetManagement() {
+  const { can } = useRBAC();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [query, setQuery] = useState('');
@@ -109,12 +111,12 @@ export default function AssetManagement() {
     <header className="flex-none border-b border-phantom-border bg-phantom-surface/70 px-6 py-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><div className="text-[10px] font-mono uppercase tracking-[0.18em] text-phantom-cyan mb-2">Attack surface inventory</div><h1 className="text-xl font-semibold tracking-tight">Assets</h1><p className="text-sm text-phantom-text-secondary mt-1 max-w-2xl">The authoritative inventory of systems PHANTOM is permitted to assess.</p></div>
-        <div className="flex gap-2"><button onClick={() => void load()} className="h-9 px-3 border border-phantom-border rounded-lg text-xs flex items-center gap-2 hover:bg-phantom-panel"><RefreshCw size={13}/>Refresh</button><button onClick={openCreate} className="h-9 px-3 rounded-lg bg-phantom-text-primary text-black text-xs font-semibold flex items-center gap-2"><Plus size={13}/>Add asset</button></div>
+        <div className="flex gap-2"><button onClick={() => void load()} className="h-9 px-3 border border-phantom-border rounded-lg text-xs flex items-center gap-2 hover:bg-phantom-panel"><RefreshCw size={13}/>Refresh</button><button onClick={openCreate} disabled={!can('scan:create')} title={!can('scan:create') ? 'You do not have permission to create assets' : 'Create asset'} className="h-9 px-3 rounded-lg bg-phantom-text-primary text-black text-xs font-semibold flex items-center gap-2"><Plus size={13}/>Add asset</button></div>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-5">
         <Metric label="Inventory" value={counts.total} icon={Globe2}/><Metric label="Criticality: critical" value={counts.critical} icon={ShieldAlert}/><Metric label="High / critical risk" value={counts.exposed} icon={ShieldAlert}/><Metric label="Scanned" value={counts.scanned} icon={CheckCircle2}/>
       </div>
-      <div className="flex flex-wrap items-center gap-2 mt-4"><button onClick={importInventory} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Import CSV</button><button onClick={()=>void exportInventory()} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Export CSV</button>{selectedIds.length>0&&<><button onClick={()=>void bulk("activate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Activate ({selectedIds.length})</button><button onClick={()=>void bulk("deactivate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Deactivate</button><button onClick={()=>void bulk("delete")} className="h-9 px-3 border border-phantom-coral/30 text-phantom-coral rounded-lg text-xs">Delete</button></>}</div><div className="flex flex-wrap items-center gap-2 mt-2">
+      <div className="flex flex-wrap items-center gap-2 mt-4"><button onClick={importInventory} disabled={!can('workspace:manage')} title={!can('workspace:manage') ? 'You do not have permission to import assets' : 'Import CSV'} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Import CSV</button><button onClick={()=>void exportInventory()} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Export CSV</button>{selectedIds.length>0&&<><button onClick={()=>void bulk("activate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Activate ({selectedIds.length})</button><button onClick={()=>void bulk("deactivate")} className="h-9 px-3 border border-phantom-border rounded-lg text-xs">Deactivate</button><button onClick={()=>void bulk("delete")} className="h-9 px-3 border border-phantom-coral/30 text-phantom-coral rounded-lg text-xs">Delete</button></>}</div><div className="flex flex-wrap items-center gap-2 mt-2">
         <div className="relative flex-1 min-w-[220px] max-w-lg"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-phantom-text-tertiary" size={14}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search host, target, or owner…" className="w-full h-9 bg-phantom-panel border border-phantom-border rounded-lg pl-9 pr-3 text-xs outline-none focus:border-phantom-cyan"/></div>
         <Select value={status} onChange={setStatus} options={['all','active','inactive']} label="Status"/><Select value={environment} onChange={setEnvironment} options={['all','production','staging','development','internal','unknown']} label="Environment"/><Select value={criticality} onChange={setCriticality} options={['all','critical','high','medium','low']} label="Criticality"/>
         <span className="h-9 px-3 border border-phantom-border rounded-lg flex items-center gap-2 text-[11px] text-phantom-text-tertiary"><Filter size={13}/>{assets.length} shown</span>
