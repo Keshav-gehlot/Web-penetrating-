@@ -36,6 +36,10 @@ jobs:
           alembic history
           alembic heads
       - name: Render Alembic migration plan
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./phantom-plan.db
+          PHANTOM_AUTH_SECRET: ci-only-auth-secret
+          PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
         run: |
           cd backend
           alembic upgrade head --sql > /tmp/phantom-schema.sql
@@ -52,7 +56,7 @@ jobs:
           alembic upgrade head
           alembic downgrade 0011_asset_inventory
           alembic upgrade head
-          test -f ../phantom-ci.db
+          test -f phantom-ci.db
       - name: Run backend unit tests
         run: |
           cd backend
