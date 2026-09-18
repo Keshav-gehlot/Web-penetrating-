@@ -24,12 +24,14 @@ class Principal:
     role: str
     workspace_id: str
     user_id: str | None = None
+    session_id: str | None = None
 
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=256)
     workspace_id: str = Field(default="default", min_length=1, max_length=100)
+    mfa_code: str | None = None
 
 
 def new_totp_secret()->str: return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
@@ -44,7 +46,7 @@ def _sign(payload: str) -> str:
     return hmac.new(settings.AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None) -> str:
+def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None, session_id: str | None = None) -> str:
     expires = int((datetime.now(timezone.utc) + timedelta(hours=hours if hours is not None else settings.SESSION_HOURS)).timestamp())
     uid = user_id or ""
     sid = session_id or "legacy"
