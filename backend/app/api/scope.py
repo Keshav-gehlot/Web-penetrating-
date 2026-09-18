@@ -143,6 +143,12 @@ async def put_scope(
         row = WorkspaceScope(id=str(uuid4()), workspace_id=principal.workspace_id)
         db.add(row)
 
+    if policy_changed:
+        row.approval_status = "pending"
+        row.approved_at = None
+        row.approved_by = None
+        row.approval_comment = None
+
     row.enabled = payload.enabled
     row.authorized_targets = normalized["authorized_targets"]
     row.excluded_targets = normalized["excluded_targets"]
@@ -214,6 +220,60 @@ async def put_scope(
 
     return {**scope_snapshot(row), "configured": True, "cancelled_scan_count": len(cancelled_ids)}
 
+
+
+@router.post("/approve")
+async def approve_scope(
+    request: Request,
+    comment: str | None = None,
+    principal: Principal = Depends(require_permission("scope:approve")),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == principal.workspace_id))
+    if row is None:
+        raise HTTPException(409, "Workspace scope is not configured")
+    if not row.enabled:
+        raise HTTPException(409, "Scope must be enabled before approval")
+    if not row.authorization_acknowledged:
+        raise HTTPException(409, "Scope authorization must be acknowledged before approval")
+    if row.acknowledged_by and row.acknowledged_by == principal.user_id:
+        raise HTTPException(409, "Scope approval requires a different user from the authorization acknowledgement")
+    if row.approval_status == "approved":
+        return {**scope_snapshot(row), "configured": True}
+    now = datetime.now(timezone.utc)
+    row.approval_status = "approved"
+    row.approved_at = now
+    row.approved_by = principal.user_id
+    row.approval_comment = (comment or "").strip()[:2000] or None
+    await record_audit(db, request, "scope.approved", "workspace_scope", row.id, {
+        "approval_status": row.approval_status, "approved_by": principal.user_id, "comment": row.approval_comment,
+    }, principal)
+    await db.commit()
+    await db.refresh(row)
+    return {**scope_snapshot(row), "configured": True}
+
+
+@router.post("/reject")
+async def reject_scope(
+    request: Request,
+    comment: str | None = None,
+    principal: Principal = Depends(require_permission("scope:approve")),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == principal.workspace_id))
+    if row is None:
+        raise HTTPException(409, "Workspace scope is not configured")
+    now = datetime.now(timezone.utc)
+    row.approval_status = "rejected"
+    row.approved_at = None
+    row.approved_by = principal.user_id
+    row.approval_comment = (comment or "").strip()[:2000] or None
+    await record_audit(db, request, "scope.rejected", "workspace_scope", row.id, {
+        "approval_status": row.approval_status, "rejected_by": principal.user_id, "comment": row.approval_comment,
+    }, principal)
+    await db.commit()
+    await db.refresh(row)
+    return {**scope_snapshot(row), "configured": True}
 
 @router.post("/check")
 async def check_target(
