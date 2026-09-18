@@ -264,6 +264,8 @@ async def create_scan(payload: ScanRequest, request: Request, principal: Princip
     scope = await scope_result if inspect.isawaitable(scope_result) else scope_result
     if scope is None:
         raise HTTPException(409, "Workspace scope is not configured. Configure an authorized scope before starting scans.")
+    if scope.get("approval_status") != "approved":
+        raise HTTPException(409, "Workspace scope must be approved before starting a scan")
     try:
         normalized = normalize_target(payload.target)
         validate_target_against_scope(normalized, scope)
