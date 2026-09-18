@@ -198,3 +198,67 @@ def test_scope_runtime_rejects_disallowed_port_and_path():
 
 async def _done():
     return None
+
+
+@pytest.mark.asyncio
+async def test_scope_update_requires_reconfirmation_after_authorization_policy_change(monkeypatch):
+    principal = Principal("owner@example.com", "owner", "workspace-1", "user-1")
+    existing = SimpleNamespace(
+        id="scope-1",
+        workspace_id="workspace-1",
+        enabled=True,
+        authorized_targets=["example.com"],
+        excluded_targets=[],
+        allowed_ports=[443],
+        allowed_paths=["/"],
+        blocked_paths=[],
+        max_requests=25,
+        max_concurrency=1,
+        max_redirects=2,
+        authorization_acknowledged=True,
+        authorization_acknowledged_at=None,
+        acknowledged_by="user-1",
+    )
+
+    class FakeDB:
+        async def scalar(self, query):
+            return existing
+
+        async def scalars(self, query):
+            class Rows:
+                def all(self):
+                    return []
+            return Rows()
+
+        def add(self, obj):
+            return None
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def refresh(self, obj):
+            return None
+
+    monkeypatch.setattr(scope, "record_audit", lambda *args, **kwargs: _done())
+    monkeypatch.setattr(scope, "record_operational_event", lambda *args, **kwargs: _done())
+
+    payload = scope.ScopeRequest(
+        enabled=True,
+        authorized_targets=["new.example.com"],
+        allowed_ports=[443],
+        allowed_paths=["/"],
+        max_requests=25,
+        max_concurrency=1,
+        max_redirects=2,
+        authorization_acknowledged=True,
+        authorization_reconfirmed=False,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await scope.put_scope(payload, None, principal, FakeDB())
+
+    assert exc.value.status_code == 400
+    assert "re-confirm" in str(exc.value.detail).lower()
