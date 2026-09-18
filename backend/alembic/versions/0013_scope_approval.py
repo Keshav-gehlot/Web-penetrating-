@@ -1,14 +1,14 @@
 """add explicit workspace scope approval workflow
 
 Revision ID: 0013_scope_approval
-Revises: 0012_asset_services_history
+Revises: 0014_cve_context_unique
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0013_scope_approval"
-down_revision = "0012_asset_services_history"
+down_revision = "0014_cve_context_unique"
 
 
 def upgrade():
