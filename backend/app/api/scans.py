@@ -123,6 +123,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
 
         try:
             total = len(scan.modules)
+            module_metrics = {}
             for index, module_name in enumerate(scan.modules, 1):
                 state = await db.get(Scan, scan_id)
                 if not state:
@@ -192,10 +193,25 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                     await _op("finding.created", f"Finding created: {finding.title}", workspace_id=scan.workspace_id, scan_id=scan.id, severity=finding.severity, metadata={"finding_id": finding.id, "module": finding.module, "severity": finding.severity, "evidence_hash": finding.evidence_hash})
                     await bus.publish(scan_id, {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(finding)})
 
+                module_metrics[module_name] = result.get("metrics", {})
                 await db.commit()
-                await _op("module.completed", f"Scanner module completed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"module": module_name, "index": index, "total": total, "finding_count": len(seen)})
+                await _op("module.completed", f"Scanner module completed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"module": module_name, "index": index, "total": total, "finding_count": len(seen), "metrics": result.get("metrics", {})})
                 await bus.publish(scan_id, {"event": "module.completed", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
 
+            # Cross-module correlation is advisory: it links independent signals without treating candidates as proof.
+            finding_rows = (await db.scalars(select(Finding).where(Finding.scan_id == scan.id))).all()
+            by_location = {}
+            for row in finding_rows:
+                evidence = row.evidence or {}
+                location = evidence.get("url") or evidence.get("path") or evidence.get("parameter")
+                if location:
+                    by_location.setdefault(str(location), set()).add(row.module)
+            correlations = [
+                {"location": location, "modules": sorted(modules)}
+                for location, modules in by_location.items() if len(modules) > 1
+            ][:100]
+            await _op("scan.correlation", "Cross-module scanner signals correlated", workspace_id=scan.workspace_id, scan_id=scan.id,
+                      metadata={"correlations": correlations, "correlation_count": len(correlations), "module_metrics": module_metrics})
             scan.status = "completed"
             scan.completed_at = datetime.now(timezone.utc)
             scan.worker_id = None
