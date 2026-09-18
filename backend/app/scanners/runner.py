@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from . import modules as scanner_modules
 from .modules import MODULES, PROFILES
@@ -31,15 +32,28 @@ async def run_module(
     if name not in MODULES:
         raise KeyError(f"Unknown scanner module: {name}")
     ensure_runtime(runtime_id or f"module:{name}:{target}", scope=scope)
+    started = time.monotonic()
+    runtime = ensure_runtime(runtime_id or f"module:{name}:{target}", scope=scope)
+    request_before = runtime.requests
     try:
         result = await asyncio.wait_for(MODULES[name](target), timeout=settings.SCAN_MODULE_TIMEOUT_SECONDS)
-        return json_safe(result)
+        result = json_safe(result)
+        elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+        for item in result.get("findings", []):
+            evidence = dict(item.get("evidence") or {})
+            evidence.setdefault("schema_version", "1.0")
+            evidence.setdefault("target", target)
+            evidence.setdefault("request_count", runtime.requests - request_before)
+            item["evidence"] = evidence
+            item.setdefault("provenance", {"module": name, "method": "passive_or_safe_probe", "version": "2.1"})
+        result["metrics"] = {"duration_ms": elapsed_ms, "requests": runtime.requests - request_before, "finding_count": len(result.get("findings", []))}
+        return result
     except asyncio.TimeoutError:
-        return {"module": name, "status": "timeout", "error": f"Module exceeded {settings.SCAN_MODULE_TIMEOUT_SECONDS}s execution budget", "findings": []}
+        return {"module": name, "status": "timeout", "error": f"Module exceeded {settings.SCAN_MODULE_TIMEOUT_SECONDS}s execution budget", "findings": [], "metrics": {"duration_ms": round((time.monotonic() - started) * 1000, 1), "requests": runtime.requests - request_before}}
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        return {"module": name, "status": "error", "error": str(exc), "findings": []}
+        return {"module": name, "status": "error", "error": str(exc), "findings": [], "metrics": {"duration_ms": round((time.monotonic() - started) * 1000, 1), "requests": runtime.requests - request_before}}
 
 
 async def run_profile(
