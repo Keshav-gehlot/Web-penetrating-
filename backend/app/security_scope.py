@@ -15,7 +15,9 @@ class ScopeViolation(ValueError):
     """Raised when a target or outbound request is outside the workspace scope."""
 
 
-def normalize_target(value: str) -> str:
+def normalize_target(value: str | dict[str, object]) -> str:
+    if isinstance(value, dict):
+        value = str(value.get("target") or "")
     value = value.strip()
     if not value:
         raise ValueError("Target is required")
@@ -210,6 +212,25 @@ def validate_target_against_scope(value: str, scope: dict[str, object]) -> dict[
 
 
 def scope_snapshot(scope) -> dict[str, object]:
+    if isinstance(scope, dict):
+        return {
+            "id": scope.get("id"),
+            "workspace_id": scope.get("workspace_id"),
+            "enabled": bool(scope.get("enabled")),
+            "authorized_targets": list(scope.get("authorized_targets") or []),
+            "excluded_targets": list(scope.get("excluded_targets") or []),
+            "allowed_ports": [int(x) for x in (scope.get("allowed_ports") or [80, 443])],
+            "allowed_paths": list(scope.get("allowed_paths") or ["/"]),
+            "blocked_paths": list(scope.get("blocked_paths") or []),
+            "max_requests": int(scope.get("max_requests", 250)),
+            "max_concurrency": int(scope.get("max_concurrency", 1)),
+            "max_redirects": int(scope.get("max_redirects", 3)),
+            "authorization_acknowledged": bool(scope.get("authorization_acknowledged")),
+            "authorization_acknowledged_at": scope.get("authorization_acknowledged_at"),
+            "acknowledged_by": scope.get("acknowledged_by"),
+            "created_at": scope.get("created_at"),
+            "updated_at": scope.get("updated_at"),
+        }
     return {
         "id": scope.id if scope else None,
         "workspace_id": scope.workspace_id if scope else None,
