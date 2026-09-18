@@ -63,7 +63,7 @@ jobs:
         run: |
           cd backend
           alembic upgrade head
-          alembic downgrade 0011_asset_inventory
+          alembic downgrade -1
           alembic upgrade head
       - name: Run backend unit tests
         run: |
