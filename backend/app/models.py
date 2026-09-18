@@ -125,7 +125,7 @@ class AssetTechnology(Base):
 class CVEIntelligence(Base):
     __tablename__ = "cve_intelligence"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    cve: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    cve: Mapped[str] = mapped_column(String(32), index=True)
     cpe: Mapped[str] = mapped_column(String(255), index=True)
     product: Mapped[str] = mapped_column(String(160), index=True)
     version: Mapped[str] = mapped_column(String(120), index=True)
