@@ -90,10 +90,12 @@ async def current_principal(authorization: str | None = Header(default=None)) ->
             AuthSession.workspace_id == principal.workspace_id, AuthSession.revoked_at.is_(None),
             AuthSession.expires_at >= datetime.now(timezone.utc),
         ))
+        if not user or not member or not session:
+            raise HTTPException(401, "Session is no longer active")
+        session.last_seen_at = datetime.now(timezone.utc)
+        await db.commit()
     if not user or not member or not session:
         raise HTTPException(401, "Session is no longer active")
-    session.last_seen_at = datetime.now(timezone.utc)
-    await db.commit()
     return Principal(user.email, member.role, member.workspace_id, user.id, principal.session_id)
 
 
