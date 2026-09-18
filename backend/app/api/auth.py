@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..auth import LoginRequest, Principal, issue_token, current_principal
+from ..auth import LoginRequest, Principal, issue_token, current_principal, new_totp_secret, verify_totp
 from ..config import settings
 from ..database import get_db
 from ..models import User, WorkspaceMember, AuthSession, PasswordResetToken, EmailVerificationToken, AuthInvitation
@@ -87,6 +87,22 @@ async def reset_confirm(payload:PasswordResetConfirm,request:Request,db:AsyncSes
     rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.revoked_at.is_(None)))
     for s in rows.all(): s.revoked_at=_now()
     await record_audit(db,request,"auth.password_reset_completed","user",user.id,None,actor=user.email); await db.commit(); return {"reset":True}
+@router.post("/mfa/setup")
+async def mfa_setup(principal:Principal=Depends(current_principal),db:AsyncSession=Depends(get_db)):
+    user=await db.get(User,principal.user_id); secret=user.mfa_secret or new_totp_secret(); user.mfa_secret=secret; await db.commit()
+    return {"secret":secret,"otpauth":"otpauth://totp/PHANTOM:"+user.email+"?secret="+secret+"&issuer=PHANTOM"}
+
+@router.post("/mfa/enable")
+async def mfa_enable(code:str,principal:Principal=Depends(current_principal),request:Request=None,db:AsyncSession=Depends(get_db)):
+    user=await db.get(User,principal.user_id)
+    if not user or not user.mfa_secret or not verify_totp(user.mfa_secret,code): raise HTTPException(400,"Invalid MFA code")
+    user.mfa_enabled=True; await record_audit(db,request,"auth.mfa_enabled","user",user.id,None,principal); await db.commit(); return {"enabled":True}
+
+@router.post("/mfa/disable")
+async def mfa_disable(code:str,principal:Principal=Depends(current_principal),request:Request=None,db:AsyncSession=Depends(get_db)):
+    user=await db.get(User,principal.user_id)
+    if not user or not user.mfa_secret or not verify_totp(user.mfa_secret,code): raise HTTPException(400,"Invalid MFA code")
+    user.mfa_enabled=False; await record_audit(db,request,"auth.mfa_disabled","user",user.id,None,principal); await db.commit(); return {"enabled":False}
 @router.post("/invitations/accept")
 async def accept_invitation(payload:InvitationAccept,request:Request,db:AsyncSession=Depends(get_db)):
     row=await db.scalar(select(AuthInvitation).where(AuthInvitation.token_hash==_hash_token(payload.token),AuthInvitation.accepted_at.is_(None),AuthInvitation.expires_at>=_now()))
