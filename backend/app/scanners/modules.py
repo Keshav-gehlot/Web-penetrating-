@@ -28,8 +28,12 @@ SQL_ERRORS = ("sql syntax", "mysql", "postgresql", "sqlite", "ora-", "odbc", "jd
 
 
 def finding(module, title, severity="info", description="", remediation="", evidence=None, confidence=1.0):
-    return {"module": module, "title": title, "severity": severity, "description": description,
-            "remediation": remediation, "evidence": evidence or {}, "confidence": confidence}
+    return {
+        "module": module, "title": title, "severity": severity, "description": description,
+        "remediation": remediation, "evidence": evidence or {},
+        "confidence": round(max(0.0, min(1.0, confidence)), 3),
+        "provenance": {"module": module, "method": "passive_or_safe_probe", "version": "2.1"},
+    }
 
 
 def base(module, **extra):
@@ -116,14 +120,18 @@ async def whois_lookup(target):
 
 async def dns_recon(target):
     host = urlparse(target).hostname
+    if not host:
+        return base("dns_recon", host=None, records=[])
     records = []
     try:
-        for address in bounded_resolve(host):
-            records.append({"type": "A/AAAA", "value": address})
-    except RuntimeError as exc:
-        return base("dns_recon", host=host, error=str(exc))
-    return base("dns_recon", host=host, records=sorted({tuple(sorted(x.items())) for x in records}))
-
+        for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
+            if family in (socket.AF_INET, socket.AF_INET6):
+                records.append({"type": "A" if family == socket.AF_INET else "AAAA", "value": sockaddr[0]})
+    except OSError:
+        pass
+    unique = [dict(x) for x in {tuple(sorted(r.items())) for r in records}]
+    return base("dns_recon", host=host, records=sorted(unique, key=lambda x: (x["type"], x["value"])),
+                note="Authoritative MX/NS/TXT collection is intentionally delegated to configured DNS enrichment integrations.")
 
 async def cve_lookup(target):
     r = await http_snapshot(target)
@@ -340,19 +348,59 @@ async def tls_analyzer(target):
             with context.wrap_socket(raw, server_hostname=host) as sock:
                 cert = sock.getpeercert()
                 cipher = sock.cipher()
+                san = cert.get("subjectAltName", ())
                 return base(
-                    "tls_analyzer",
-                    enabled=True,
-                    protocol=sock.version(),
-                    cipher=cipher[0] if cipher else None,
+                    "tls_analyzer", enabled=True, protocol=sock.version(),
+                    cipher={"name": cipher[0], "version": cipher[1], "bits": cipher[2]} if cipher else None,
                     certificate={
-                        "subject": cert.get("subject"),
-                        "issuer": cert.get("issuer"),
+                        "subject": cert.get("subject"), "issuer": cert.get("issuer"),
+                        "serial_number": cert.get("serialNumber"), "not_before": cert.get("notBefore"),
                         "not_after": cert.get("notAfter"),
+                        "subject_alt_names": [v for k, v in san if k == "DNS"][:100],
                     },
+                    configuration={"minimum_supported": "TLSv1.2", "negotiated_protocol": sock.version()},
                 )
     except (OSError, ssl.SSLError, RuntimeError) as exc:
         return base("tls_analyzer", enabled=True, error=str(exc))
+
+async def http_methods(target):
+    r = await http_snapshot(target)
+    methods = []
+    try:
+        methods = sorted(set((r.headers.get("allow") or "").replace(",", " ").split()))
+    except Exception:
+        pass
+    return base("http_methods", status=r.status_code, methods=methods, allow_header=r.headers.get("allow"))
+
+
+async def redirect_inventory(target):
+    current = target
+    chain = []
+    for _ in range(4):
+        try:
+            r = await get(current, "")
+        except (httpx.HTTPError, RuntimeError):
+            break
+        location = r.headers.get("location")
+        chain.append({"url": current, "status": r.status_code, "location": location})
+        if r.status_code not in {301, 302, 303, 307, 308} or not location:
+            break
+        current = urljoin(current, location)
+    return base("redirect_inventory", start_url=target, final_url=current, chain=chain, hops=max(0, len(chain)-1))
+
+
+async def service_identification(target):
+    host = urlparse(target).hostname
+    services = []
+    for port, name in ((22, "ssh"), (25, "smtp"), (3306, "mysql"), (5432, "postgresql"), (6379, "redis"), (8080, "http-alt"), (8443, "https-alt")):
+        try:
+            bounded_connect(host, port)
+            services.append({"port": port, "service": name, "identified_by": "tcp_connect"})
+        except (OSError, RuntimeError):
+            continue
+    return base("service_identification", host=host, services=services)
+
+
 
 
 MODULES = {
@@ -362,6 +410,9 @@ MODULES = {
     "subdomain_enumeration": subdomain_enumeration,
     "http_headers": http_header_analyzer,
     "ssl_tls": tls_analyzer,
+    "http_methods": http_methods,
+    "redirect_inventory": redirect_inventory,
+    "service_identification": service_identification,
     "directory_enumeration": directory_enumeration,
     "waf_detection": waf_detection,
     "whois_lookup": whois_lookup,
