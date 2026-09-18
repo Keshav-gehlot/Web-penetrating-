@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, CheckCircle2, CircleDot, Filter, Globe2, Pencil, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Archive, CheckCircle2, Filter, Globe2, Pencil, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
 import { authHeaders } from '../lib/auth';
 import { useNavigate } from 'react-router-dom';
 
