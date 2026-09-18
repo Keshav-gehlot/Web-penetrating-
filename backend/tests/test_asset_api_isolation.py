@@ -133,3 +133,11 @@ async def test_asset_import_cannot_bypass_scope(client, api_db):
     assert response.status_code == 200
     assert response.json()["skipped"] == 1
     assert await api_db.scalar(select(Asset).where(Asset.host == "forbidden.example.com")) is None
+
+
+@pytest.mark.asyncio
+async def test_asset_export_is_workspace_isolated(client):
+    response = await client.get("/api/v1/assets/export.csv")
+    assert response.status_code == 200
+    assert "a.example.com" in response.text
+    assert "b.example.com" not in response.text
