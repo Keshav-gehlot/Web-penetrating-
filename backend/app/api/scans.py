@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
 from ..database import SessionLocal, get_db
-from ..models import Asset, Finding, Scan, WorkspaceScope
+from ..models import Asset, CVEIntelligence, Finding, Scan, WorkspaceScope
 from ..observability import record_operational_event
 from ..queue import enqueue_scan
 from ..rbac import require_permission
@@ -33,7 +33,30 @@ def serialize_scan(scan: Scan) -> dict:
 
 
 def serialize_finding(finding: Finding) -> dict:
-    return {"id": finding.id, "module": finding.module, "title": finding.title, "severity": finding.severity, "status": finding.status, "fingerprint": finding.fingerprint, "cve": finding.cve, "cwe": finding.cwe, "cvss": finding.cvss, "assignee": finding.assignee, "description": finding.description, "remediation": finding.remediation, "evidence": finding.evidence, "evidence_hash": finding.evidence_hash, "evidence_collected_at": finding.evidence_collected_at.isoformat() if finding.evidence_collected_at else None, "evidence_source": finding.evidence_source, "confidence": finding.confidence}
+    return {
+        "id": finding.id, "scan_id": finding.scan_id, "module": finding.module,
+        "title": finding.title, "severity": finding.severity, "status": finding.status,
+        "fingerprint": finding.fingerprint, "cve": finding.cve, "cwe": finding.cwe, "cvss": finding.cvss,
+        "product": finding.product, "version": finding.version, "cpe": finding.cpe,
+        "cvss_v3": {"score": finding.cvss_v3_score, "vector": finding.cvss_v3_vector, "severity": finding.cvss_v3_severity} if finding.cvss_v3_score is not None else None,
+        "cvss_v4": {"score": finding.cvss_v4_score, "vector": finding.cvss_v4_vector, "severity": finding.cvss_v4_severity} if finding.cvss_v4_score is not None else None,
+        "cve_published_at": finding.cve_published_at.isoformat() if finding.cve_published_at else None,
+        "cve_modified_at": finding.cve_modified_at.isoformat() if finding.cve_modified_at else None,
+        "affected_versions": finding.cve_affected_versions or [], "references": finding.cve_references or [],
+        "assignee": finding.assignee, "description": finding.description, "remediation": finding.remediation,
+        "evidence": finding.evidence, "evidence_hash": finding.evidence_hash,
+        "evidence_collected_at": finding.evidence_collected_at.isoformat() if finding.evidence_collected_at else None,
+        "evidence_source": finding.evidence_source, "confidence": finding.confidence,
+    }
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def severity_rank(value: str) -> int:
@@ -145,8 +168,26 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                         continue
 
                     evidence = item.get("evidence") or {}
-                    finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=evidence, evidence_hash=evidence_digest(evidence), evidence_source="scanner", confidence=float(item.get("confidence", 1.0)))
+                    finding = Finding(scan_id=scan.id, module=item.get("module", module_name), title=item.get("title", "Untitled finding"), severity=item.get("severity", "info"), status="open", fingerprint=fingerprint, cve=item.get("cve"), cwe=item.get("cwe"), cvss=item.get("cvss"), product=item.get("product"), version=item.get("version"), cpe=item.get("cpe"), cvss_v3_score=item.get("cvss_v3_score"), cvss_v3_vector=item.get("cvss_v3_vector"), cvss_v3_severity=item.get("cvss_v3_severity"), cvss_v4_score=item.get("cvss_v4_score"), cvss_v4_vector=item.get("cvss_v4_vector"), cvss_v4_severity=item.get("cvss_v4_severity"), cve_published_at=_parse_dt(item.get("published")), cve_modified_at=_parse_dt(item.get("modified")), cve_affected_versions=item.get("affected_versions", []), cve_references=item.get("references", []), description=item.get("description", ""), remediation=item.get("remediation", ""), evidence=evidence, evidence_hash=evidence_digest(evidence), evidence_source="NVD" if item.get("cve") else "scanner", confidence=float(item.get("confidence", 1.0)))
                     db.add(finding)
+                    if item.get("cve"):
+                        cached = await db.scalar(select(CVEIntelligence).where(CVEIntelligence.cve == item["cve"]))
+                        v3 = item.get("cvss_v3") or {}
+                        v4 = item.get("cvss_v4") or {}
+                        values = {
+                            "cpe": item.get("cpe") or "", "product": item.get("product") or "", "version": item.get("version") or "",
+                            "description": item.get("description") or "", "severity": item.get("severity", "info"), "cvss": item.get("cvss"),
+                            "cvss_v3_score": v3.get("score"), "cvss_v3_vector": v3.get("vector"), "cvss_v3_severity": v3.get("severity"),
+                            "cvss_v4_score": v4.get("score"), "cvss_v4_vector": v4.get("vector"), "cvss_v4_severity": v4.get("severity"),
+                            "published_at": _parse_dt(item.get("published")), "modified_at": _parse_dt(item.get("modified")),
+                            "affected_versions": item.get("affected_versions", []), "references": item.get("references", []),
+                            "remediation": item.get("remediation", ""), "source": "NVD", "fetched_at": datetime.now(timezone.utc),
+                        }
+                        if cached:
+                            for key, value in values.items():
+                                setattr(cached, key, value)
+                        else:
+                            db.add(CVEIntelligence(id=str(uuid4()), cve=item["cve"], **values))
                     await db.flush()
                     await _op("finding.created", f"Finding created: {finding.title}", workspace_id=scan.workspace_id, scan_id=scan.id, severity=finding.severity, metadata={"finding_id": finding.id, "module": finding.module, "severity": finding.severity, "evidence_hash": finding.evidence_hash})
                     await bus.publish(scan_id, {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(finding)})
