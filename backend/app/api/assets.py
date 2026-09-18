@@ -216,7 +216,9 @@ async def resolve_asset(asset_id: str, request: Request, principal: Principal = 
     if not asset: raise HTTPException(404, "Asset not found")
     addresses = public_addresses(asset.host)
     now = datetime.now(timezone.utc)
+    previous = set(asset.addresses or [])
     asset.addresses, asset.last_resolved_at, asset.last_seen_at = addresses, now, now
+    if set(addresses) != previous: await _history(db, asset, 'network.addresses_changed', {'previous': sorted(previous), 'current': sorted(addresses)})
     await record_audit(db, request, "asset.resolved", "asset", asset.id, {"address_count": len(addresses)}, principal)
     await db.commit()
     return await serialize(asset, db)
