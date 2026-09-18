@@ -16,6 +16,20 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: phantom
+          POSTGRES_PASSWORD: phantom
+          POSTGRES_DB: phantom_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U phantom -d phantom_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,7 +51,7 @@ jobs:
           alembic heads
       - name: Render Alembic migration plan
         env:
-          DATABASE_URL: sqlite+aiosqlite:///./phantom-plan.db
+          DATABASE_URL: postgresql+asyncpg://phantom:phantom@127.0.0.1:5432/phantom_ci
           PHANTOM_AUTH_SECRET: ci-only-auth-secret
           PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
         run: |
@@ -48,7 +62,7 @@ jobs:
           grep -q "asset_history" /tmp/phantom-schema.sql
       - name: Migration smoke test
         env:
-          DATABASE_URL: sqlite+aiosqlite:///./phantom-ci.db
+          DATABASE_URL: postgresql+asyncpg://phantom:phantom@127.0.0.1:5432/phantom_ci
           PHANTOM_AUTH_SECRET: ci-only-auth-secret
           PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
         run: |
@@ -56,7 +70,6 @@ jobs:
           alembic upgrade head
           alembic downgrade 0011_asset_inventory
           alembic upgrade head
-          test -f phantom-ci.db
       - name: Run backend unit tests
         run: |
           cd backend
