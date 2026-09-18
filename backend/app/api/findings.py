@@ -17,7 +17,22 @@ class FindingUpdate(BaseModel):status:str|None=Field(default=None);assignee:str|
 def evidence_digest(evidence:dict|None)->str:
     canonical=json.dumps(evidence or {},sort_keys=True,separators=(",",":"),ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
-def serialize(f):return {"id":f.id,"scan_id":f.scan_id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"evidence_hash":f.evidence_hash,"evidence_collected_at":f.evidence_collected_at.isoformat() if f.evidence_collected_at else None,"evidence_source":f.evidence_source,"confidence":f.confidence,"first_seen":f.first_seen.isoformat() if f.first_seen else None,"last_seen":f.last_seen.isoformat() if f.last_seen else None}
+def serialize(f):
+    return {
+        "id": f.id, "scan_id": f.scan_id, "module": f.module, "title": f.title,
+        "severity": f.severity, "status": f.status, "fingerprint": f.fingerprint,
+        "cve": f.cve, "cwe": f.cwe, "cvss": f.cvss,
+        "product": f.product, "version": f.version, "cpe": f.cpe,
+        "cvss_v3": {"score": f.cvss_v3_score, "vector": f.cvss_v3_vector, "severity": f.cvss_v3_severity} if f.cvss_v3_score is not None else None,
+        "cvss_v4": {"score": f.cvss_v4_score, "vector": f.cvss_v4_vector, "severity": f.cvss_v4_severity} if f.cvss_v4_score is not None else None,
+        "cve_published_at": f.cve_published_at.isoformat() if f.cve_published_at else None,
+        "cve_modified_at": f.cve_modified_at.isoformat() if f.cve_modified_at else None,
+        "affected_versions": f.cve_affected_versions or [], "references": f.cve_references or [],
+        "assignee": f.assignee, "description": f.description, "remediation": f.remediation,
+        "evidence": f.evidence, "evidence_hash": f.evidence_hash,
+        "evidence_collected_at": f.evidence_collected_at.isoformat() if f.evidence_collected_at else None,
+        "evidence_source": f.evidence_source, "confidence": f.confidence,
+    }
 def fingerprint_for(scan:Scan,item:dict)->str:
  evidence=item.get("evidence") or {};stable=evidence.get("url") or evidence.get("path") or evidence.get("host") or "";return hashlib.sha256(f"{scan.host}|{item.get('module','')}|{item.get('title','')}|{stable}".lower().encode()).hexdigest()
 def scoped_finding(finding_id,workspace_id,db):return db.scalar(select(Finding).join(Scan).where(Finding.id==finding_id,Scan.workspace_id==workspace_id))
