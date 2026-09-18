@@ -27,6 +27,10 @@ export type WorkspaceScope = {
   authorization_acknowledged: boolean;
   authorization_acknowledged_at: string | null;
   acknowledged_by: string | null;
+  approval_status: "pending" | "approved" | "rejected";
+  approved_at: string | null;
+  approved_by: string | null;
+  approval_comment: string | null;
   created_at: string | null;
   updated_at: string | null;
   effective_limits: { max_requests: number; max_concurrency: number; max_redirects: number };
@@ -47,4 +51,15 @@ export async function saveScope(payload: Omit<WorkspaceScope, 'id' | 'workspace_
 export async function checkScopeTarget(target: string): Promise<{ allowed: boolean; target?: string; host?: string; port?: number; reason?: string }> {
   const query = new URLSearchParams({ target });
   return request(`/api/v1/scope/check?${query.toString()}`, { method: 'POST' });
+}
+
+
+export async function approveScope(comment?: string): Promise<WorkspaceScope> {
+  const query = comment?.trim() ? `?comment=${encodeURIComponent(comment.trim())}` : '';
+  return request(`/api/v1/scope/approve${query}`, { method: 'POST' });
+}
+
+export async function rejectScope(comment?: string): Promise<WorkspaceScope> {
+  const query = comment?.trim() ? `?comment=${encodeURIComponent(comment.trim())}` : '';
+  return request(`/api/v1/scope/reject${query}`, { method: 'POST' });
 }
