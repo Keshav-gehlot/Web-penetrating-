@@ -58,6 +58,7 @@ async def dispatch_due() -> int:
                         "next_run_at": schedule.next_run_at.isoformat(),
                     },
                     None,
+                    workspace_id=schedule.workspace_id,
                 )
                 await record_operational_event(
                     "schedule.scope_blocked",
