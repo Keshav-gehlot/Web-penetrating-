@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
 from ..database import get_db
-from ..models import Asset, Finding, Scan, WorkspaceScope
+from ..models import Asset, AssetHistory, AssetService, Finding, Scan, WorkspaceScope
 from ..rbac import require_permission
 from ..security_scope import ScopeViolation, normalize_target, scope_snapshot, validate_target, validate_target_against_scope
 from .audit import record_audit
@@ -60,6 +60,36 @@ def public_addresses(host: str) -> list[str]:
         return []
 
 
+
+async def _history(db, asset, event_type: str, metadata: dict | None = None, scan_id: str | None = None):
+    db.add(AssetHistory(id=str(uuid4()), asset_id=asset.id, workspace_id=asset.workspace_id, scan_id=scan_id, event_type=event_type, metadata_json=metadata or {}))
+
+async def ingest_scan_observations(db, scan: Scan, result: dict) -> None:
+    asset = await db.scalar(select(Asset).where(Asset.id == scan.asset_id, Asset.workspace_id == scan.workspace_id))
+    if not asset: return
+    now = datetime.now(timezone.utc)
+    changed = False
+    for row in result.get('ports', []) or []:
+        try: port = int(row.get('port'))
+        except (TypeError, ValueError): continue
+        protocol = str(row.get('protocol', 'tcp')).lower()
+        state = str(row.get('state', 'open')).lower()
+        service = row.get('service')
+        existing = await db.scalar(select(AssetService).where(AssetService.asset_id == asset.id, AssetService.port == port, AssetService.protocol == protocol))
+        if existing:
+            if existing.state != state or existing.service != service:
+                changed = True; existing.state, existing.service, existing.last_seen_at, existing.source_scan_id = state, service, now, scan.id
+        else:
+            changed = True
+            db.add(AssetService(id=str(uuid4()), asset_id=asset.id, port=port, protocol=protocol, service=service, state=state, source_scan_id=scan.id, first_seen_at=now, last_seen_at=now))
+    subdomains = result.get('subdomains', []) or []
+    if subdomains: await _history(db, asset, 'discovery.subdomains', {'count': len(subdomains), 'hosts': [x.get('host') for x in subdomains[:100]]}, scan.id); changed = True
+    technologies = result.get('technologies', []) or []
+    if technologies: await _history(db, asset, 'discovery.technology', {'technologies': technologies[:100]}, scan.id); changed = True
+    if changed:
+        asset.last_seen_at = now
+        await _history(db, asset, 'discovery.updated', {'module': result.get('module'), 'ports': len(result.get('ports', []) or [])}, scan.id)
+
 async def serialize(asset, db, include_scans=False):
     scans = (await db.scalars(select(Scan).where(Scan.asset_id == asset.id).order_by(Scan.created_at.desc()).limit(10 if include_scans else 1))).all()
     findings = (await db.scalars(select(Finding).join(Scan).where(Scan.asset_id == asset.id))).all()
@@ -78,7 +108,11 @@ async def serialize(asset, db, include_scans=False):
         "last_resolved_at": asset.last_resolved_at.isoformat() if asset.last_resolved_at else None,
         "created_at": asset.created_at.isoformat() if asset.created_at else None,
     }
+    services = (await db.scalars(select(AssetService).where(AssetService.asset_id == asset.id).order_by(AssetService.port))).all()
+    result['services'] = [{'port': s.port, 'protocol': s.protocol, 'service': s.service, 'state': s.state, 'first_seen_at': s.first_seen_at.isoformat() if s.first_seen_at else None, 'last_seen_at': s.last_seen_at.isoformat() if s.last_seen_at else None} for s in services]
     if include_scans:
+        history = (await db.scalars(select(AssetHistory).where(AssetHistory.asset_id == asset.id).order_by(AssetHistory.created_at.desc()).limit(100))).all()
+        result['history'] = [{'id': h.id, 'event_type': h.event_type, 'scan_id': h.scan_id, 'metadata': h.metadata_json, 'created_at': h.created_at.isoformat() if h.created_at else None} for h in history]
         result["recent_scans"] = [{"id": s.id, "profile": s.profile, "status": s.status,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None} for s in scans]
