@@ -104,6 +104,31 @@ class Asset(Base):
     __table_args__ = (UniqueConstraint("workspace_id", "host", name="uq_asset_workspace_host"),)
 
 
+class AssetService(Base):
+    __tablename__ = "asset_services"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    port: Mapped[int] = mapped_column(Integer)
+    protocol: Mapped[str] = mapped_column(String(16), default="tcp")
+    service: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="open")
+    source_scan_id: Mapped[str | None] = mapped_column(ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("asset_id", "port", "protocol", name="uq_asset_service_port"),)
+
+
+class AssetHistory(Base):
+    __tablename__ = "asset_history"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    scan_id: Mapped[str | None] = mapped_column(ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class Scan(Base):
     __tablename__ = "scans"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
