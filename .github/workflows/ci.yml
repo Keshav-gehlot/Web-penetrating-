@@ -63,8 +63,8 @@ jobs:
         run: |
           cd backend
           alembic upgrade head
-          alembic downgrade 0012_asset_services_history-1
-          test "$(alembic current | grep -c '0011_asset_inventory')" -eq 1
+          alembic downgrade base
+          alembic upgrade head
           alembic upgrade head
       - name: Run backend unit tests
         run: |
