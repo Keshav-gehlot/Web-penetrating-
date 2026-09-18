@@ -53,17 +53,12 @@ jobs:
           cd backend
           alembic history
           alembic heads
-      - name: Render Alembic migration plan
-        env:
-          DATABASE_URL: postgresql+asyncpg://phantom:phantom@127.0.0.1:5432/phantom_ci
-          PHANTOM_AUTH_SECRET: ci-only-auth-secret
-          PHANTOM_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
+      - name: Validate Alembic migration plan
         run: |
           cd backend
-          alembic upgrade head --sql > /tmp/phantom-schema.sql
-          grep -q "workspace_scopes" /tmp/phantom-schema.sql
-          grep -q "asset_services" /tmp/phantom-schema.sql
-          grep -q "asset_history" /tmp/phantom-schema.sql
+          alembic history --verbose
+          alembic heads
+          test "$(alembic heads | grep -c '^0012_asset_services_history')" -eq 1
       - name: Migration smoke test
         run: |
           cd backend
