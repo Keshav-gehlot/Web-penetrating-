@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, ChevronRight, CircleHelp, Globe2, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
-import { checkScopeTarget, getScope, saveScope, type WorkspaceScope } from '../lib/scopeApi';
+import { approveScope, checkScopeTarget, getScope, rejectScope, saveScope, type WorkspaceScope } from '../lib/scopeApi';
 
 const emptyScope: WorkspaceScope = {
   id: null, workspace_id: null, configured: false, enabled: false,
@@ -28,6 +28,8 @@ export default function ScopeManager() {
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [approvalComment, setApprovalComment] = useState('');
+  const [approvalBusy, setApprovalBusy] = useState(false);
 
   const load = async () => {
     setLoading(true); setError(''); setMessage('');
@@ -93,6 +95,17 @@ export default function ScopeManager() {
     catch (e) { setError(errorText(e, 'Unable to save scope')); }
     finally { setSaving(false); }
   };
+  const changeApproval = async (approve: boolean) => {
+    setApprovalBusy(true); setError(''); setMessage('');
+    try {
+      const value = approve ? await approveScope(approvalComment) : await rejectScope(approvalComment);
+      setScope(value); setDraft(toDraft(value)); setApprovalComment('');
+      setMessage(approve ? 'Scope approved. Scans may execute under the approved policy.' : 'Scope approval rejected. Scans remain blocked until approval is granted.');
+    } catch (e) {
+      setError(errorText(e, approve ? 'Unable to approve scope' : 'Unable to reject scope'));
+    } finally { setApprovalBusy(false); }
+  };
+
   const check = async () => {
     if (!checkInput.trim()) return;
     setChecking(true); setCheckResult(null); setError('');
@@ -116,6 +129,29 @@ export default function ScopeManager() {
     </header>
 
     <main className="max-w-6xl mx-auto p-6 space-y-5">
+      <section className="border border-phantom-border rounded-xl bg-phantom-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-phantom-border flex items-center justify-between">
+          <div className="flex items-center gap-2"><ShieldCheck size={14} className="text-phantom-cyan"/><span className="text-xs font-semibold">Scope approval</span></div>
+          <span className="text-[10px] uppercase tracking-wider text-phantom-text-tertiary">{scope.approval_status}</span>
+        </div>
+        <div className="p-4 grid lg:grid-cols-[1fr_auto] gap-4 items-end">
+          <div>
+            <div className="text-xs text-phantom-text-secondary leading-5">
+              Authorization acknowledgement records that the configured targets are authorized. Approval is a separate governance step and is required before scan execution.
+            </div>
+            <div className="mt-3 text-[11px] text-phantom-text-tertiary">
+              {scope.approved_by ? `Approved/rejected by ${scope.approved_by}` : 'No approval decision recorded.'}
+              {scope.approval_comment ? ` · ${scope.approval_comment}` : ''}
+            </div>
+            <input value={approvalComment} onChange={e => setApprovalComment(e.target.value)} maxLength={2000} placeholder="Approval note (optional)" className="control mt-3 w-full"/>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => void changeApproval(false)} disabled={approvalBusy || !scope.configured} className="h-9 px-3 rounded-lg border border-phantom-coral/30 text-phantom-coral text-xs disabled:opacity-40">Reject</button>
+            <button onClick={() => void changeApproval(true)} disabled={approvalBusy || !scope.configured || !scope.enabled || !scope.authorization_acknowledged} className="h-9 px-3 rounded-lg bg-phantom-cyan/15 border border-phantom-cyan/30 text-phantom-cyan text-xs font-semibold disabled:opacity-40">{approvalBusy ? 'Saving…' : 'Approve scope'}</button>
+          </div>
+        </div>
+      </section>
+
       <section className="grid lg:grid-cols-[1.5fr_1fr] gap-5">
         <Panel title="Authorization boundary" icon={LockKeyhole}>
           <div className="rounded-lg border border-phantom-amber/25 bg-phantom-amber/5 p-3 text-xs text-phantom-text-secondary flex gap-3"><AlertTriangle size={15} className="text-phantom-amber shrink-0 mt-0.5"/><div><strong className="text-phantom-text-primary">Only add systems you are authorized to assess.</strong><div className="mt-1 leading-5">PHANTOM rejects local/private destinations and applies this workspace allowlist before a scan and before each outbound request.</div></div></div>
