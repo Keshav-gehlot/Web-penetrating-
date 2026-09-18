@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import LoginRequest, Principal, issue_token, current_principal
 from ..config import settings
 from ..database import get_db
-from ..models import User, WorkspaceMember, AuthSession, PasswordResetToken, EmailVerificationToken
+from ..models import User, WorkspaceMember, AuthSession, PasswordResetToken, EmailVerificationToken, AuthInvitation
 from ..security import hash_password, is_legacy_sha256, verify_legacy_sha256, verify_password
 from .audit import record_audit
 router=APIRouter(prefix="/api/v1/auth",tags=["auth"])
@@ -23,6 +23,7 @@ class PasswordChangeRequest(BaseModel): current_password:str=Field(min_length=8,
 class PasswordResetRequest(BaseModel): email:str=Field(min_length=3,max_length=255)
 class PasswordResetConfirm(BaseModel): token:str=Field(min_length=20,max_length=512); new_password:str=Field(min_length=8,max_length=256)
 class VerifyEmailRequest(BaseModel): token:str=Field(min_length=20,max_length=512)
+class InvitationAccept(BaseModel): token:str=Field(min_length=20,max_length=512);password:str=Field(min_length=8,max_length=256)
 async def _session_response(user, member, db, request):
     sid=secrets.token_urlsafe(18); refresh=secrets.token_urlsafe(48); now=_now(); exp=now+timedelta(hours=settings.SESSION_HOURS)
     s=AuthSession(user_id=user.id,workspace_id=member.workspace_id,refresh_token_hash=_hash_token(refresh),access_token_id=sid,user_agent=request.headers.get("user-agent"),ip_address=request.client.host if request.client else None,expires_at=exp)
@@ -86,6 +87,17 @@ async def reset_confirm(payload:PasswordResetConfirm,request:Request,db:AsyncSes
     rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.revoked_at.is_(None)))
     for s in rows.all(): s.revoked_at=_now()
     await record_audit(db,request,"auth.password_reset_completed","user",user.id,None,actor=user.email); await db.commit(); return {"reset":True}
+@router.post("/invitations/accept")
+async def accept_invitation(payload:InvitationAccept,request:Request,db:AsyncSession=Depends(get_db)):
+    row=await db.scalar(select(AuthInvitation).where(AuthInvitation.token_hash==_hash_token(payload.token),AuthInvitation.accepted_at.is_(None),AuthInvitation.expires_at>=_now()))
+    if not row: raise HTTPException(400,"Invitation is invalid or expired")
+    user=await db.scalar(select(User).where(User.email==row.email))
+    if user and await db.scalar(select(WorkspaceMember).where(WorkspaceMember.user_id==user.id,WorkspaceMember.workspace_id==row.workspace_id)): raise HTTPException(409,"Invitation has already been accepted")
+    if not user: user=User(email=row.email,display_name=row.display_name,password_hash=hash_password(payload.password),email_verified=False,is_active=True); db.add(user); await db.flush()
+    else: user.password_hash=hash_password(payload.password); user.is_active=True
+    member=WorkspaceMember(workspace_id=row.workspace_id,user_id=user.id,role=row.role); db.add(member); row.accepted_at=_now()
+    await record_audit(db,request,"auth.invitation_accepted","auth_invitation",row.id,{"email":row.email,"role":row.role},actor=row.email); await db.commit()
+    return {"accepted":True,"workspace_id":row.workspace_id,"email":row.email}
 @router.post("/email/verify")
 async def verify_email(payload:VerifyEmailRequest,request:Request,db:AsyncSession=Depends(get_db)):
     row=await db.scalar(select(EmailVerificationToken).where(EmailVerificationToken.token_hash==_hash_token(payload.token),EmailVerificationToken.used_at.is_(None),EmailVerificationToken.expires_at>=_now()))
