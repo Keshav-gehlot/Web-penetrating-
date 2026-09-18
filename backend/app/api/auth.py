@@ -60,6 +60,10 @@ async def logout(principal:Principal=Depends(current_principal),request:Request=
     s=await db.get(AuthSession,principal.session_id);
     if s and not s.revoked_at: s.revoked_at=_now(); await record_audit(db,request,"auth.logout","auth_session",s.id,None,principal)
     await db.commit(); return {"revoked":True}
+@router.get("/sessions")
+async def list_sessions(principal:Principal=Depends(current_principal),db:AsyncSession=Depends(get_db)):
+    rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==principal.user_id).order_by(AuthSession.last_seen_at.desc()))
+    return [{"id":s.id,"workspace_id":s.workspace_id,"user_agent":s.user_agent,"ip_address":s.ip_address,"created_at":s.last_seen_at.isoformat() if s.last_seen_at else None,"expires_at":s.expires_at.isoformat(),"revoked":bool(s.revoked_at),"current":s.id==principal.session_id} for s in rows.all()]
 @router.post("/sessions/revoke-all")
 async def revoke_all(principal:Principal=Depends(current_principal),request:Request=None,db:AsyncSession=Depends(get_db)):
     rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==principal.user_id,AuthSession.revoked_at.is_(None))); now=_now(); count=0
