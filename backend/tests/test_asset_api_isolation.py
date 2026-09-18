@@ -74,3 +74,21 @@ async def test_asset_findings_cannot_cross_workspace(client):
 async def test_bulk_operation_rejects_cross_workspace_asset_ids(client):
     response = await client.post("/api/v1/assets/bulk", json={"asset_ids": ["asset-a", "asset-b"], "action": "deactivate"})
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_asset_update_cannot_cross_workspace(client):
+    response = await client.patch("/api/v1/assets/asset-b", json={"notes": "attempted"})
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_asset_delete_cannot_cross_workspace(client):
+    response = await client.delete("/api/v1/assets/asset-b")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_asset_import_requires_scope(client):
+    response = await client.post("/api/v1/assets/import", json={"assets": [{"target": "https://new.example.com"}]})
+    assert response.status_code == 409
