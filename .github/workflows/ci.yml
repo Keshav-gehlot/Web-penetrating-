@@ -35,6 +35,11 @@ jobs:
           cd backend
           alembic history
           alembic heads
+      - name: Render Alembic migration plan
+        run: |
+          cd backend
+          alembic upgrade head --sql > /tmp/phantom-schema.sql
+          grep -q "workspace_scopes" /tmp/phantom-schema.sql
       - name: Run backend unit tests
         run: |
           cd backend
