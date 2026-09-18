@@ -37,5 +37,6 @@ from .api.scans import router as scans_router
 from .api.schedules import router as schedules_router
 from .api.scope import router as scope_router
 from .api.system import router as system_router
+from .api.intelligence import router as intelligence_router
 from .api.workspaces import router as workspaces_router
 for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,schedules_router,scope_router,health_router,system_router,operations_router): app.include_router(router)
