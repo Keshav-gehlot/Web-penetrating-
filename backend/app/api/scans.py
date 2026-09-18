@@ -17,6 +17,7 @@ from ..scanners.runner import MODULES, PROFILES, run_module
 from ..security_scope import ScopeViolation, normalize_target, scope_snapshot, validate_target, validate_target_against_scope
 from .audit import record_audit
 from .findings import evidence_digest, fingerprint_for
+from .assets import ingest_scan_observations
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
@@ -97,6 +98,7 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                 await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
                 result = await run_module(module_name, scan.target, runtime_id=scan.id, scope=scope)
                 result_status = str(result.get("status", "ok"))
+                await ingest_scan_observations(db, scan, result)
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
                     await _op("module.failed", f"Scanner module failed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, severity="error", metadata={"module": module_name, "status": result_status, "error": error})
