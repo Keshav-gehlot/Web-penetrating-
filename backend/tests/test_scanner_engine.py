@@ -2,6 +2,7 @@ import pytest
 
 from app.scanners import modules
 from app.scanners.runner import run_module
+from app.scanners.runtime import bounded_dns_records, ensure_runtime
 
 
 def test_finding_confidence_is_normalized():
@@ -47,3 +48,16 @@ async def test_runner_attaches_metrics_and_evidence(monkeypatch):
 def test_discovery_modules_have_safe_scope_wrappers():
     assert callable(modules.MODULES["dns_recon"])
     assert callable(modules.MODULES["redirect_inventory"])
+
+
+def test_dns_helper_rejects_out_of_scope_host():
+    ensure_runtime("scope-test", scope={
+        "authorized_targets": ["allowed.example.com"],
+        "excluded_targets": [],
+        "allowed_ports": [443],
+        "allowed_paths": ["/"],
+        "blocked_paths": [],
+        "max_requests": 5,
+    })
+    with pytest.raises(RuntimeError, match="outside the authorized workspace scope"):
+        bounded_dns_records("outside.example.com")
