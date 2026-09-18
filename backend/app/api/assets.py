@@ -69,19 +69,32 @@ async def ingest_scan_observations(db, scan: Scan, result: dict) -> None:
     if not asset: return
     now = datetime.now(timezone.utc)
     changed = False
+    observed_ports: set[tuple[int, str]] = set()
     for row in result.get('ports', []) or []:
         try: port = int(row.get('port'))
         except (TypeError, ValueError): continue
         protocol = str(row.get('protocol', 'tcp')).lower()
+        observed_ports.add((port, protocol))
         state = str(row.get('state', 'open')).lower()
         service = row.get('service')
         existing = await db.scalar(select(AssetService).where(AssetService.asset_id == asset.id, AssetService.port == port, AssetService.protocol == protocol))
         if existing:
             if existing.state != state or existing.service != service:
-                changed = True; existing.state, existing.service, existing.last_seen_at, existing.source_scan_id = state, service, now, scan.id
+                changed = True
+                await _history(db, asset, 'service.changed', {'port': port, 'protocol': protocol, 'previous_state': existing.state, 'state': state, 'service': service}, scan.id)
+                existing.state, existing.service, existing.last_seen_at, existing.source_scan_id = state, service, now, scan.id
         else:
             changed = True
             db.add(AssetService(id=str(uuid4()), asset_id=asset.id, port=port, protocol=protocol, service=service, state=state, source_scan_id=scan.id, first_seen_at=now, last_seen_at=now))
+            await _history(db, asset, 'service.discovered', {'port': port, 'protocol': protocol, 'service': service}, scan.id)
+    if result.get('module') == 'port_scanner':
+        existing_services = (await db.scalars(select(AssetService).where(AssetService.asset_id == asset.id))).all()
+        for service_row in existing_services:
+            key = (service_row.port, service_row.protocol)
+            if key not in observed_ports and service_row.state != 'closed':
+                changed = True
+                await _history(db, asset, 'service.closed', {'port': service_row.port, 'protocol': service_row.protocol}, scan.id)
+                service_row.state, service_row.source_scan_id = 'closed', scan.id
     subdomains = result.get('subdomains', []) or []
     if subdomains: await _history(db, asset, 'discovery.subdomains', {'count': len(subdomains), 'hosts': [x.get('host') for x in subdomains[:100]]}, scan.id); changed = True
     technologies = result.get('technologies', []) or []
@@ -198,9 +211,9 @@ async def export_assets(request: Request, principal: Principal = Depends(require
     import csv, io
     rows = (await db.scalars(select(Asset).where(Asset.workspace_id == principal.workspace_id).order_by(Asset.host))).all()
     out = io.StringIO(); writer = csv.writer(out)
-    writer.writerow(["id", "host", "target", "type", "environment", "criticality", "owner", "status", "tags", "addresses"])
+    writer.writerow(["id", "host", "target", "type", "environment", "criticality", "owner", "status", "tags", "addresses", "notes"])
     for a in rows:
-        writer.writerow([a.id, a.host, a.target, a.asset_type, a.environment, a.criticality, a.owner or "", a.status, "|".join(a.tags or []), "|".join(a.addresses or [])])
+        writer.writerow([a.id, a.host, a.target, a.asset_type, a.environment, a.criticality, a.owner or "", a.status, "|".join(a.tags or []), "|".join(a.addresses or []), a.notes or ""])
     await record_audit(db, request, "asset.exported", "asset_inventory", None, {"count": len(rows)}, principal); await db.commit()
     return Response(content=out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=phantom-assets.csv"})
 
