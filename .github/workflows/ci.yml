@@ -59,9 +59,11 @@ jobs:
           alembic history --verbose
           alembic heads
           test "$(alembic heads | grep -c '^0012_asset_services_history')" -eq 1
-      - name: Migration smoke test
+      - name: Migration upgrade / downgrade / re-upgrade
         run: |
           cd backend
+          alembic upgrade head
+          alembic downgrade 0011_asset_inventory
           alembic upgrade head
       - name: Run backend unit tests
         run: |
