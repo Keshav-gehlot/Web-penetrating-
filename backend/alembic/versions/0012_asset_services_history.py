@@ -33,7 +33,7 @@ def upgrade():
         sa.Column("workspace_id", sa.String(36), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False),
         sa.Column("scan_id", sa.String(36), sa.ForeignKey("scans.id", ondelete="SET NULL")),
         sa.Column("event_type", sa.String(64), nullable=False),
-        sa.Column("metadata", sa.JSON(), nullable=False),
+        sa.Column("metadata_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_asset_history_asset_id", "asset_history", ["asset_id"])
