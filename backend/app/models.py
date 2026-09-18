@@ -53,6 +53,10 @@ class WorkspaceScope(Base):
     authorization_acknowledged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     authorization_acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     acknowledged_by: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    approval_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    approval_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
