@@ -38,7 +38,7 @@ def _sign(payload: str) -> str:
 def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None) -> str:
     expires = int((datetime.now(timezone.utc) + timedelta(hours=hours if hours is not None else settings.SESSION_HOURS)).timestamp())
     uid = user_id or ""
-    sid = session_id or ""
+    sid = session_id or "legacy"
     payload = f"{actor}|{role}|{workspace_id}|{uid}|{expires}|{sid}"
     return f"{payload}|{_sign(payload)}"
 
