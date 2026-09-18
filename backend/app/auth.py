@@ -38,25 +38,26 @@ def _sign(payload: str) -> str:
 def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None) -> str:
     expires = int((datetime.now(timezone.utc) + timedelta(hours=hours if hours is not None else settings.SESSION_HOURS)).timestamp())
     uid = user_id or ""
-    payload = f"{actor}|{role}|{workspace_id}|{uid}|{expires}"
+    sid = session_id or ""
+    payload = f"{actor}|{role}|{workspace_id}|{uid}|{expires}|{sid}"
     return f"{payload}|{_sign(payload)}"
 
 
 def principal_from_token(token: str) -> Principal:
     parts = token.split("|")
-    if len(parts) != 6:
+    if len(parts) != 7:
         raise HTTPException(401, "Invalid authentication token")
-    actor, role, workspace_id, user_id, expiry, signature = parts
-    payload = "|".join(parts[:5])
+    actor, role, workspace_id, user_id, expiry, session_id, signature = parts
+    payload = "|".join(parts[:6])
     try:
         valid = int(expiry) >= int(datetime.now(timezone.utc).timestamp())
     except ValueError:
         valid = False
     if not valid or not hmac.compare_digest(signature, _sign(payload)):
         raise HTTPException(401, "Authentication token expired or invalid")
-    if not user_id:
-        raise HTTPException(401, "Authentication token missing user identity")
-    return Principal(actor, role, workspace_id, user_id)
+    if not user_id or not session_id:
+        raise HTTPException(401, "Authentication token missing session identity")
+    return Principal(actor, role, workspace_id, user_id, session_id)
 
 
 async def current_principal(authorization: str | None = Header(default=None)) -> Principal:
@@ -68,15 +69,21 @@ async def current_principal(authorization: str | None = Header(default=None)) ->
 
     async with SessionLocal() as db:
         user = await db.scalar(select(User).where(User.id == principal.user_id, User.is_active.is_(True)))
-        member = await db.scalar(
-            select(WorkspaceMember).where(
-                WorkspaceMember.user_id == principal.user_id,
-                WorkspaceMember.workspace_id == principal.workspace_id,
-            )
-        )
-    if not user or not member:
+        member = await db.scalar(select(WorkspaceMember).where(
+            WorkspaceMember.user_id == principal.user_id,
+            WorkspaceMember.workspace_id == principal.workspace_id,
+        ))
+        from .models import AuthSession
+        session = await db.scalar(select(AuthSession).where(
+            AuthSession.id == principal.session_id, AuthSession.user_id == principal.user_id,
+            AuthSession.workspace_id == principal.workspace_id, AuthSession.revoked_at.is_(None),
+            AuthSession.expires_at >= datetime.now(timezone.utc),
+        ))
+    if not user or not member or not session:
         raise HTTPException(401, "Session is no longer active")
-    return Principal(user.email, member.role, member.workspace_id, user.id)
+    session.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+    return Principal(user.email, member.role, member.workspace_id, user.id, principal.session_id)
 
 
 WS_TICKET_TTL_SECONDS = settings.WS_TICKET_TTL_SECONDS
