@@ -256,3 +256,104 @@ async def tech_detection(target):
     for name,pat in (("WordPress",r"wp-content|wp-includes"),("React",r"__react|reactroot"),("Next.js",r"__next_f|_next/static"),("Django",r"csrfmiddlewaretoken")):
         if re.search(pat,text,re.I): tech.append({"name":name,"confidence":0.7})
     return base("technology_detection", technologies=tech)
+
+
+async def endpoint_inventory(target):
+    response, parser = await html_parser(target)
+    target_host = urlparse(target).hostname
+    endpoints = []
+    for match in re.finditer(r'href=["\']([^"\']+)', response.text, re.I):
+        href = urljoin(str(response.url), match.group(1))
+        if urlparse(href).hostname == target_host:
+            endpoints.append(href)
+    return base("endpoint_inventory", endpoints=sorted(set(endpoints))[:500], forms=parser.forms)
+
+
+async def http_header_analyzer(target):
+    response = await http_snapshot(target)
+    headers = {key.lower(): value for key, value in response.headers.items()}
+    required = {
+        "strict-transport-security": ("high", "Enable HSTS on HTTPS deployments."),
+        "content-security-policy": ("medium", "Define a restrictive CSP."),
+        "x-content-type-options": ("medium", "Set X-Content-Type-Options: nosniff."),
+        "referrer-policy": ("low", "Set an explicit Referrer-Policy."),
+        "permissions-policy": ("low", "Restrict unnecessary browser capabilities."),
+    }
+    findings = [
+        finding("http_header_analyzer", f"Missing {header}", severity,
+                "The expected security response header was not present.", remediation,
+                {"status": response.status_code}, 0.99)
+        for header, (severity, remediation) in required.items()
+        if header not in headers
+    ]
+    return base("http_header_analyzer", status=response.status_code,
+                final_url=str(response.url), headers=dict(response.headers), findings=findings)
+
+
+async def tls_analyzer(target):
+    parsed = urlparse(target)
+    host = parsed.hostname
+    port = parsed.port or 443
+    if parsed.scheme != "https":
+        return base("tls_analyzer", enabled=False, note="Target is not HTTPS")
+    try:
+        with scoped_tcp_socket(host, port) as raw:
+            context = ssl.create_default_context()
+            with context.wrap_socket(raw, server_hostname=host) as sock:
+                cert = sock.getpeercert()
+                cipher = sock.cipher()
+                return base(
+                    "tls_analyzer",
+                    enabled=True,
+                    protocol=sock.version(),
+                    cipher=cipher[0] if cipher else None,
+                    certificate={
+                        "subject": cert.get("subject"),
+                        "issuer": cert.get("issuer"),
+                        "not_after": cert.get("notAfter"),
+                    },
+                )
+    except (OSError, ssl.SSLError, RuntimeError) as exc:
+        return base("tls_analyzer", enabled=True, error=str(exc))
+
+
+MODULES = {
+    "port_scanner": port_scanner,
+    "sql_injection": sqli_detector,
+    "xss_detector": xss_detector,
+    "subdomain_enumeration": subdomain_enumeration,
+    "http_headers": http_header_analyzer,
+    "ssl_tls": tls_analyzer,
+    "directory_enumeration": directory_enumeration,
+    "waf_detection": waf_detection,
+    "whois_lookup": whois_lookup,
+    "dns_recon": dns_recon,
+    "cve_lookup": cve_lookup,
+    "csrf_detector": csrf_detector,
+    "ssrf_detector": ssrf_detector,
+    "xxe_detector": xxe_detector,
+    "authentication_tester": auth_tester,
+    "open_redirect": open_redirect_detector,
+    "security_txt": security_txt,
+    "robots_sitemap": robots_sitemap,
+    "cookie_audit": cookie_audit,
+    "cors_audit": cors_audit,
+    "technology_detection": tech_detection,
+    "endpoint_inventory": endpoint_inventory,
+    "net_watch": port_scanner,
+}
+
+PROFILES = {
+    "quick": (
+        "dns_recon",
+        "http_headers",
+        "ssl_tls",
+        "security_txt",
+        "robots_sitemap",
+        "cookie_audit",
+        "cors_audit",
+        "technology_detection",
+    ),
+    "standard": tuple(MODULES.keys()),
+    "deep": tuple(MODULES.keys()),
+}
