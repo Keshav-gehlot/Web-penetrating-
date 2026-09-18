@@ -126,3 +126,34 @@ def test_scope_rejects_disallowed_port_and_path():
 def test_scope_entry_rejects_private_networks():
     with pytest.raises(ValueError, match="Private"):
         normalize_scope_entry("10.0.0.0/8")
+
+
+def test_scope_snapshot_includes_approval_state():
+    from app.security_scope import scope_snapshot
+
+    class Scope:
+        id = "scope-1"
+        workspace_id = "workspace-1"
+        enabled = True
+        authorized_targets = ["example.com"]
+        excluded_targets = []
+        allowed_ports = [443]
+        allowed_paths = ["/"]
+        blocked_paths = []
+        max_requests = 100
+        max_concurrency = 2
+        max_redirects = 3
+        authorization_acknowledged = True
+        authorization_acknowledged_at = None
+        acknowledged_by = "user-1"
+        approval_status = "approved"
+        approved_at = None
+        approved_by = "user-2"
+        approval_comment = "Approved for scheduled assessment."
+        created_at = None
+        updated_at = None
+
+    snapshot = scope_snapshot(Scope())
+    assert snapshot["approval_status"] == "approved"
+    assert snapshot["approved_by"] == "user-2"
+    assert snapshot["approval_comment"] == "Approved for scheduled assessment."
