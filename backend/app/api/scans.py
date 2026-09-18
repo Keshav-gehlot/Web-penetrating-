@@ -303,6 +303,8 @@ async def run_scan(scan_id: str, request: Request, principal: Principal = Depend
     scope = await scope_result if inspect.isawaitable(scope_result) else scope_result
     if scope is None:
         raise HTTPException(409, "Workspace scope is not configured")
+    if scope.get("approval_status") != "approved":
+        raise HTTPException(409, "Workspace scope must be approved before re-queueing a scan")
     try:
         validate_target_against_scope(scan.target, scope)
     except ScopeViolation as exc:
