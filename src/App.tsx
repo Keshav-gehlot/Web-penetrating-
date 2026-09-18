@@ -30,7 +30,7 @@ import ScopeManager from './pages/ScopeManager';
 function Protected() {
   const location = useLocation();
   const session = getSession();
-  const { loading, can } = useRBAC();
+  const { loading } = useRBAC();
 
   useEffect(() => {
     const timer = window.setInterval(() => {
