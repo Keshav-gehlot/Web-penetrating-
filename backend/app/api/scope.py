@@ -38,6 +38,7 @@ class ScopeRequest(BaseModel):
     max_concurrency: int = Field(default=1, ge=1, le=16)
     max_redirects: int = Field(default=3, ge=0, le=5)
     authorization_acknowledged: bool = False
+    authorization_reconfirmed: bool = False
 
 
 def _cancel_scans_for_scope_change(scans, now: datetime) -> list[str]:
@@ -118,6 +119,25 @@ async def put_scope(
 
     row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == principal.workspace_id))
     policy_changed = _policy_changed(row, normalized, payload)
+    authorization_policy_changed = row is not None and any(
+        (
+            row.authorized_targets != normalized["authorized_targets"],
+            row.excluded_targets != normalized["excluded_targets"],
+            row.allowed_ports != normalized["allowed_ports"],
+            row.allowed_paths != normalized["allowed_paths"],
+            row.blocked_paths != normalized["blocked_paths"],
+            row.max_requests != payload.max_requests,
+            row.max_concurrency != payload.max_concurrency,
+            row.max_redirects != payload.max_redirects,
+        )
+    )
+    if (
+        authorization_policy_changed
+        and row.authorization_acknowledged
+        and payload.authorization_acknowledged
+        and not payload.authorization_reconfirmed
+    ):
+        raise HTTPException(400, "Policy changed. Re-confirm authorization before restoring the acknowledgement.")
     now = datetime.now(timezone.utc)
     if row is None:
         row = WorkspaceScope(id=str(uuid4()), workspace_id=principal.workspace_id)
