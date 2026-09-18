@@ -52,6 +52,8 @@ async def list_schedules(principal: Principal = Depends(require_permission("scan
 @router.post("")
 async def create_schedule(payload: ScheduleRequest, request: Request, principal: Principal = Depends(require_permission("scan:create")), db: AsyncSession = Depends(get_db)):
     scope = await _scope(db, principal.workspace_id)
+    if scope.get("approval_status") != "approved":
+        raise HTTPException(409, "Workspace scope must be approved before creating a schedule")
     try:
         normalized = normalize_target(payload.target)
         validate_target_against_scope(normalized, scope)
@@ -76,6 +78,8 @@ async def toggle_schedule(schedule_id: str, enabled: bool, request: Request, pri
     if not row: raise HTTPException(404, "Schedule not found")
     if enabled:
         scope = await _scope(db, principal.workspace_id)
+        if scope.get("approval_status") != "approved":
+            raise HTTPException(409, "Workspace scope must be approved before enabling a schedule")
         try:
             validate_target_against_scope(row.target, scope)
         except ScopeViolation as exc:
