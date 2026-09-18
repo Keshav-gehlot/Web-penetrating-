@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import base64, struct, time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -23,31 +24,42 @@ class Principal:
     role: str
     workspace_id: str
     user_id: str | None = None
+    session_id: str | None = None
 
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=256)
     workspace_id: str = Field(default="default", min_length=1, max_length=100)
+    mfa_code: str | None = None
 
 
+def new_totp_secret()->str: return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+def verify_totp(secret:str,code:str,window:int=1)->bool:
+    try: raw=base64.b32decode(secret+"="*((8-len(secret)%8)%8),casefold=True); value=int(code)
+    except (ValueError,TypeError): return False
+    for offset in range(-window,window+1):
+        counter=int(time.time()//30)+offset; msg=struct.pack(">Q",counter); digest=hmac.new(raw,msg,hashlib.sha1).digest(); pos=digest[-1]&15; otp=(struct.unpack(">I",digest[pos:pos+4])[0]&0x7fffffff)%1000000
+        if hmac.compare_digest(f"{otp:06d}",f"{value:06d}"): return True
+    return False
 def _sign(payload: str) -> str:
     return hmac.new(settings.AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None) -> str:
+def issue_token(actor: str, role: str, workspace_id: str, user_id: str | None = None, hours: int | None = None, session_id: str | None = None) -> str:
     expires = int((datetime.now(timezone.utc) + timedelta(hours=hours if hours is not None else settings.SESSION_HOURS)).timestamp())
     uid = user_id or ""
-    payload = f"{actor}|{role}|{workspace_id}|{uid}|{expires}"
+    sid = session_id or "legacy"
+    payload = f"{actor}|{role}|{workspace_id}|{uid}|{expires}|{sid}"
     return f"{payload}|{_sign(payload)}"
 
 
 def principal_from_token(token: str) -> Principal:
     parts = token.split("|")
-    if len(parts) != 6:
+    if len(parts) != 7:
         raise HTTPException(401, "Invalid authentication token")
-    actor, role, workspace_id, user_id, expiry, signature = parts
-    payload = "|".join(parts[:5])
+    actor, role, workspace_id, user_id, expiry, session_id, signature = parts
+    payload = "|".join(parts[:6])
     try:
         valid = int(expiry) >= int(datetime.now(timezone.utc).timestamp())
     except ValueError:
@@ -56,7 +68,7 @@ def principal_from_token(token: str) -> Principal:
         raise HTTPException(401, "Authentication token expired or invalid")
     if not user_id:
         raise HTTPException(401, "Authentication token missing user identity")
-    return Principal(actor, role, workspace_id, user_id)
+    return Principal(actor, role, workspace_id, user_id, None if session_id == "legacy" else session_id)
 
 
 async def current_principal(authorization: str | None = Header(default=None)) -> Principal:
@@ -68,15 +80,23 @@ async def current_principal(authorization: str | None = Header(default=None)) ->
 
     async with SessionLocal() as db:
         user = await db.scalar(select(User).where(User.id == principal.user_id, User.is_active.is_(True)))
-        member = await db.scalar(
-            select(WorkspaceMember).where(
-                WorkspaceMember.user_id == principal.user_id,
-                WorkspaceMember.workspace_id == principal.workspace_id,
-            )
-        )
-    if not user or not member:
+        member = await db.scalar(select(WorkspaceMember).where(
+            WorkspaceMember.user_id == principal.user_id,
+            WorkspaceMember.workspace_id == principal.workspace_id,
+        ))
+        from .models import AuthSession
+        session = await db.scalar(select(AuthSession).where(
+            AuthSession.id == principal.session_id, AuthSession.user_id == principal.user_id,
+            AuthSession.workspace_id == principal.workspace_id, AuthSession.revoked_at.is_(None),
+            AuthSession.expires_at >= datetime.now(timezone.utc),
+        ))
+        if not user or not member or not session:
+            raise HTTPException(401, "Session is no longer active")
+        session.last_seen_at = datetime.now(timezone.utc)
+        await db.commit()
+    if not user or not member or not session:
         raise HTTPException(401, "Session is no longer active")
-    return Principal(user.email, member.role, member.workspace_id, user.id)
+    return Principal(user.email, member.role, member.workspace_id, user.id, principal.session_id)
 
 
 WS_TICKET_TTL_SECONDS = settings.WS_TICKET_TTL_SECONDS
