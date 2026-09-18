@@ -159,6 +159,32 @@ def bounded_connect(host: str, port: int) -> None:
     sock.close()
 
 
+def bounded_dns_records(host: str, record_types: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT")) -> list[dict[str, str]]:
+    """Resolve DNS records only after PHANTOM scope and request-budget checks."""
+    runtime = _CURRENT.get()
+    if runtime is not None and runtime.scope is not None and not scope_host_allowed(host, runtime.scope):
+        raise RuntimeError("Outbound DNS lookup is outside the authorized workspace scope")
+    _consume_request()
+    try:
+        import dns.resolver
+    except ImportError:
+        return [{"type": "A" if family == socket.AF_INET else "AAAA", "value": sockaddr[0]}
+                for family, _, _, _, sockaddr in socket.getaddrinfo(host, None)
+                if family in (socket.AF_INET, socket.AF_INET6)]
+    resolver = dns.resolver.Resolver()
+    resolver.timeout = 2
+    resolver.lifetime = 3
+    records: list[dict[str, str]] = []
+    for record_type in record_types:
+        try:
+            answers = resolver.resolve(host, record_type, raise_on_no_answer=False)
+            for answer in answers:
+                records.append({"type": record_type, "value": str(answer).strip().rstrip(".")})
+        except Exception:
+            continue
+    return records
+
+
 async def bounded_options(target: str) -> httpx.Response:
     _consume_request()
     url = target
