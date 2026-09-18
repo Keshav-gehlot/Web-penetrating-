@@ -228,6 +228,10 @@ def scope_snapshot(scope) -> dict[str, object]:
             "authorization_acknowledged": bool(scope.get("authorization_acknowledged")),
             "authorization_acknowledged_at": scope.get("authorization_acknowledged_at"),
             "acknowledged_by": scope.get("acknowledged_by"),
+            "approval_status": scope.get("approval_status", "pending"),
+            "approved_at": scope.get("approved_at"),
+            "approved_by": scope.get("approved_by"),
+            "approval_comment": scope.get("approval_comment"),
             "created_at": scope.get("created_at"),
             "updated_at": scope.get("updated_at"),
         }
@@ -246,6 +250,10 @@ def scope_snapshot(scope) -> dict[str, object]:
         "authorization_acknowledged": bool(scope and scope.authorization_acknowledged),
         "authorization_acknowledged_at": scope.authorization_acknowledged_at.isoformat() if scope and scope.authorization_acknowledged_at else None,
         "acknowledged_by": scope.acknowledged_by if scope else None,
+        "approval_status": scope.approval_status if scope else "pending",
+        "approved_at": scope.approved_at.isoformat() if scope and scope.approved_at else None,
+        "approved_by": scope.approved_by if scope else None,
+        "approval_comment": scope.approval_comment if scope else None,
         "created_at": scope.created_at.isoformat() if scope and scope.created_at else None,
         "updated_at": scope.updated_at.isoformat() if scope and scope.updated_at else None,
     }
