@@ -77,5 +77,6 @@ jobs:
           node-version: '22'
       - name: Install frontend dependencies
         run: npm ci --no-audit --no-fund
-      - run: npm run lint
+      - name: TypeScript type check
+        run: npm run lint -- --pretty false
       - run: npm run build
