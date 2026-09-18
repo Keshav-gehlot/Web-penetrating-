@@ -55,6 +55,25 @@ async def refresh(payload:RefreshRequest,request:Request,db:AsyncSession=Depends
     user=await db.scalar(select(User).where(User.id==s.user_id,User.is_active.is_(True))); member=await db.scalar(select(WorkspaceMember).where(WorkspaceMember.user_id==s.user_id,WorkspaceMember.workspace_id==s.workspace_id))
     if not user or not member: s.revoked_at=_now(); await db.commit(); raise HTTPException(401,"Session is no longer active")
     s.revoked_at=_now(); response=await _session_response(user,member,db,request); await record_audit(db,request,"auth.session_refreshed","auth_session",s.id,None,actor=user.email); await db.commit(); return response
+@router.get("/me")
+async def me(principal: Principal = Depends(current_principal)):
+    from ..rbac import ALL_PERMISSIONS, PERMISSIONS, Role, role_permissions
+    role = Role(principal.role.lower())
+    permissions = role_permissions(role.value)
+    matrix = {
+        role_name.value: sorted(role_permissions(role_name.value))
+        for role_name in Role
+    }
+    return {
+        "user_id": principal.user_id,
+        "actor": principal.actor,
+        "role": role.value,
+        "workspace_id": principal.workspace_id,
+        "permissions": sorted(permissions),
+        "permission_matrix": matrix,
+        "all_permissions": ALL_PERMISSIONS,
+    }
+
 @router.post("/logout")
 async def logout(principal:Principal=Depends(current_principal),request:Request=None,db:AsyncSession=Depends(get_db)):
     s=await db.get(AuthSession,principal.session_id);
