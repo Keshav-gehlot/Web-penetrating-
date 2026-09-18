@@ -33,8 +33,15 @@ def serialize(f):
         "evidence_collected_at": f.evidence_collected_at.isoformat() if f.evidence_collected_at else None,
         "evidence_source": f.evidence_source, "confidence": f.confidence,
     }
-def fingerprint_for(scan:Scan,item:dict)->str:
- evidence=item.get("evidence") or {};stable=evidence.get("url") or evidence.get("path") or evidence.get("host") or "";return hashlib.sha256(f"{scan.host}|{item.get('module','')}|{item.get('title','')}|{stable}".lower().encode()).hexdigest()
+def fingerprint_for(scan: Scan, item: dict) -> str:
+    evidence = item.get("evidence") or {}
+    module = str(item.get("module", "")).strip().lower()
+    cve = str(item.get("cve") or "").strip().lower()
+    product = str(item.get("product") or "").strip().lower()
+    version = str(item.get("version") or "").strip().lower()
+    location = str(evidence.get("url") or evidence.get("path") or evidence.get("parameter") or evidence.get("host") or "").strip().lower()
+    identity = "|".join((scan.host.lower(), module, cve, product, version, location, str(item.get("cwe") or "").lower()))
+    return hashlib.sha256(identity.encode()).hexdigest()
 def scoped_finding(finding_id,workspace_id,db):return db.scalar(select(Finding).join(Scan).where(Finding.id==finding_id,Scan.workspace_id==workspace_id))
 @router.get("")
 async def list_findings(status:str|None=None,severity:str|None=None,principal:Principal=Depends(require_permission("finding:view")),db:AsyncSession=Depends(get_db)):
