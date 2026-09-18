@@ -40,6 +40,22 @@ class ScopeRequest(BaseModel):
     authorization_acknowledged: bool = False
 
 
+def _cancel_scans_for_scope_change(scans, now: datetime) -> list[str]:
+    cancelled_ids: list[str] = []
+    for scan in scans:
+        if scan.status not in {"queued", "running"}:
+            continue
+        scan.cancel_requested_at = now
+        scan.status = "cancelled"
+        scan.cancelled_at = now
+        scan.completed_at = now
+        scan.worker_id = None
+        scan.lease_expires_at = None
+        scan.error = "Cancelled because the workspace scope policy changed. Re-queue after reviewing the new scope."
+        cancelled_ids.append(scan.id)
+    return cancelled_ids
+
+
 def _policy_changed(row: WorkspaceScope | None, normalized: dict, payload: ScopeRequest) -> bool:
     if row is None:
         return True
@@ -128,15 +144,17 @@ async def put_scope(
                 Scan.status.in_(["queued", "running"]),
             )
         )
-        for scan in active.all():
-            scan.cancel_requested_at = now
-            scan.status = "cancelled"
-            scan.cancelled_at = now
-            scan.completed_at = now
-            scan.worker_id = None
-            scan.lease_expires_at = None
-            scan.error = "Cancelled because the workspace scope policy changed. Re-queue after reviewing the new scope."
-            cancelled_ids.append(scan.id)
+        cancelled_ids = _cancel_scans_for_scope_change(active.all(), now)
+        for scan_id in cancelled_ids:
+            await record_audit(
+                db,
+                request,
+                "scan.scope_cancelled",
+                "scan",
+                scan_id,
+                {"scope_id": row.id, "reason": "workspace scope policy changed"},
+                principal,
+            )
 
     await record_audit(
         db,
