@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-from .runtime import bounded_connect, bounded_get, bounded_resolve, bounded_snapshot, scoped_tcp_socket
+from .runtime import bounded_connect, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket
 from ..security_scope import scope_host_allowed
 from ..intelligence.cve import enrich_cpe, fingerprint_from_header
 
@@ -124,14 +124,23 @@ async def dns_recon(target):
         return base("dns_recon", host=None, records=[])
     records = []
     try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 2
+        resolver.lifetime = 3
+        for rtype in ("A", "AAAA", "CNAME", "MX", "NS", "TXT"):
+            try:
+                answers = resolver.resolve(host, rtype, raise_on_no_answer=False)
+                for answer in answers:
+                    records.append({"type": rtype, "value": str(answer).strip().rstrip(".")})
+            except Exception:
+                continue
+    except ImportError:
         for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
             if family in (socket.AF_INET, socket.AF_INET6):
                 records.append({"type": "A" if family == socket.AF_INET else "AAAA", "value": sockaddr[0]})
-    except OSError:
-        pass
     unique = [dict(x) for x in {tuple(sorted(r.items())) for r in records}]
-    return base("dns_recon", host=host, records=sorted(unique, key=lambda x: (x["type"], x["value"])),
-                note="Authoritative MX/NS/TXT collection is intentionally delegated to configured DNS enrichment integrations.")
+    return base("dns_recon", host=host, records=sorted(unique, key=lambda x: (x["type"], x["value"])))
 
 async def cve_lookup(target):
     r = await http_snapshot(target)
@@ -365,12 +374,15 @@ async def tls_analyzer(target):
 
 async def http_methods(target):
     r = await http_snapshot(target)
-    methods = []
+    options = None
     try:
-        methods = sorted(set((r.headers.get("allow") or "").replace(",", " ").split()))
-    except Exception:
+        options = await bounded_options(target)
+    except (httpx.HTTPError, RuntimeError):
         pass
-    return base("http_methods", status=r.status_code, methods=methods, allow_header=r.headers.get("allow"))
+    allow = (options.headers.get("allow") if options else None) or r.headers.get("allow")
+    methods = sorted(set((allow or "").replace(",", " ").split()))
+    return base("http_methods", status=r.status_code, options_status=options.status_code if options else None,
+                methods=methods, allow_header=allow, supported_standard_methods=["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"] )
 
 
 async def redirect_inventory(target):
