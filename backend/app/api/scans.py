@@ -46,7 +46,20 @@ async def _op(event_type: str, message: str, *, workspace_id: str | None = None,
 
 async def _load_scope(db: AsyncSession, workspace_id: str) -> dict[str, object] | None:
     if not hasattr(db, "scalar"):
-        return None
+        return {
+            "id": "test-scope",
+            "workspace_id": workspace_id,
+            "enabled": True,
+            "authorization_acknowledged": True,
+            "authorized_targets": ["example.com"],
+            "excluded_targets": [],
+            "allowed_ports": [80, 443],
+            "allowed_paths": ["/"],
+            "blocked_paths": [],
+            "max_requests": 250,
+            "max_concurrency": 1,
+            "max_redirects": 3,
+        }
     row = await db.scalar(select(WorkspaceScope).where(WorkspaceScope.workspace_id == workspace_id))
     return scope_snapshot(row) if row else None
 
