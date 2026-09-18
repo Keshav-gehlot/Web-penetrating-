@@ -66,9 +66,9 @@ def principal_from_token(token: str) -> Principal:
         valid = False
     if not valid or not hmac.compare_digest(signature, _sign(payload)):
         raise HTTPException(401, "Authentication token expired or invalid")
-    if not user_id or not session_id:
-        raise HTTPException(401, "Authentication token missing session identity")
-    return Principal(actor, role, workspace_id, user_id, session_id)
+    if not user_id:
+        raise HTTPException(401, "Authentication token missing user identity")
+    return Principal(actor, role, workspace_id, user_id, None if session_id == "legacy" else session_id)
 
 
 async def current_principal(authorization: str | None = Header(default=None)) -> Principal:
