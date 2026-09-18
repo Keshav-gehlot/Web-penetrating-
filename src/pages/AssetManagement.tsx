@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, CheckCircle2, Filter, Globe2, Pencil, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
 import { authHeaders } from '../lib/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const API = (import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 type Asset = {
@@ -31,6 +31,7 @@ export default function AssetManagement() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const nav = useNavigate();
+  const [params] = useSearchParams();
 
   const load = async () => {
     setLoading(true); setError('');
@@ -48,6 +49,7 @@ export default function AssetManagement() {
   };
 
   useEffect(() => { void load(); }, [status, environment, criticality, query]);
+  useEffect(() => { const id=params.get('asset'); if(id && assets.length){ const asset=assets.find(a=>a.id===id); if(asset) void (async()=>{const r=await fetch(`${API}/api/v1/assets/${encodeURIComponent(id)}`,{headers:authHeaders()}); if(r.ok)setSelected(await r.json());})(); } }, [assets, params]);
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setTagInput(''); setShowForm(true); setError(''); };
   const openEdit = (asset: Asset) => {
