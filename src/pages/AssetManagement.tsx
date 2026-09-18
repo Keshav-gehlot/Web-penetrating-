@@ -9,7 +9,7 @@ type Asset = {
   criticality: string; owner: string | null; tags: string[]; notes: string; status: string;
   risk: string; finding_count: number; scan_count: number; last_scan: string | null;
   last_scan_status: string | null; last_seen_at: string | null; last_resolved_at: string | null;
-  created_at: string | null; services?: {port:number;protocol:string;service:string|null;state:string;last_seen_at:string|null}[]; history?: {id:string;event_type:string;scan_id:string|null;metadata:Record<string,unknown>;created_at:string|null}[];
+  created_at: string | null; services?: {port:number;protocol:string;service:string|null;state:string;last_seen_at:string|null}[]; history?: {id:string;event_type:string;scan_id:string|null;metadata:Record<string,unknown>;created_at:string|null}[]; findings?: {id:string;scan_id:string;module:string;title:string;severity:string;status:string;fingerprint:string;cve:string|null;cwe:string|null;cvss:number|null;confidence:number;first_seen:string|null;last_seen:string|null}[];
 };
 type Form = Pick<Asset, 'target'|'type'|'environment'|'criticality'|'owner'|'tags'|'notes'|'status'>;
 
