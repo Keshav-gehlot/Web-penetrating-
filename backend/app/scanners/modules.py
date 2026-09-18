@@ -18,6 +18,7 @@ import httpx
 
 from .runtime import bounded_connect, bounded_get, bounded_resolve, bounded_snapshot, scoped_tcp_socket
 from ..security_scope import scope_host_allowed
+from ..intelligence.cve import enrich_cpe, fingerprint_from_header
 
 UA = "PHANTOM/2.0 authorized-security-assessment"
 TIMEOUT = httpx.Timeout(8.0, connect=5.0)
@@ -126,12 +127,42 @@ async def dns_recon(target):
 
 async def cve_lookup(target):
     r = await http_snapshot(target)
-    server = r.headers.get("server")
-    powered = r.headers.get("x-powered-by")
-    return base("cve_lookup", detected_software={"server": server, "x-powered-by": powered},
-                findings=[finding("cve_lookup", "Software fingerprint requires CVE enrichment", "info",
-                                  "PHANTOM captured server technology; exact CVE matching requires a versioned product fingerprint.",
-                                  evidence={"server": server, "x-powered-by": powered}, confidence=0.5)] if (server or powered) else [])
+    fingerprints = []
+    for header in ("server", "x-powered-by"):
+        fp = fingerprint_from_header(header, r.headers.get(header, ""))
+        if fp and fp not in fingerprints:
+            fingerprints.append(fp)
+    matches = []
+    for fp in fingerprints:
+        if fp.get("cpe") and fp.get("version"):
+            for cve in await enrich_cpe(fp["cpe"], fp["version"]):
+                cve["product"] = fp["product"]
+                cve["version"] = fp["version"]
+                cve["cpe"] = fp["cpe"]
+                cve["fingerprint_confidence"] = fp["confidence"]
+                matches.append(cve)
+    findings = []
+    for item in matches:
+        v4 = item.get("cvss_v4") or {}
+        v3 = item.get("cvss_v3") or {}
+        findings.append(finding(
+            "cve_lookup",
+            f"{item['cve']} — {item['product']} {item['version']}",
+            item.get("severity", "info").lower(),
+            item.get("description", ""),
+            item.get("remediation", ""),
+            evidence={"source": "NVD", "product": item["product"], "version": item["version"], "cpe": item["cpe"],
+                      "published": item.get("published"), "modified": item.get("modified"),
+                      "cvss_v3": v3, "cvss_v4": v4, "affected_versions": item.get("affected_versions", []),
+                      "references": item.get("references", [])},
+            confidence=float(item.get("fingerprint_confidence", 0.9)),
+        ) | {"cve": item["cve"], "cvss": item.get("cvss"), "cvss_v3_score": v3.get("score"),
+           "cvss_v3_vector": v3.get("vector"), "cvss_v3_severity": v3.get("severity"),
+           "cvss_v4_score": v4.get("score"), "cvss_v4_vector": v4.get("vector"),
+           "cvss_v4_severity": v4.get("severity"), "published": item.get("published"),
+           "modified": item.get("modified"), "affected_versions": item.get("affected_versions", []),
+           "references": item.get("references", [])})
+    return base("cve_lookup", detected_software=fingerprints, matches=matches, findings=findings, source="NVD")
 
 
 class FormParser(HTMLParser):
@@ -249,12 +280,19 @@ async def cors_audit(target):
 
 
 async def tech_detection(target):
-    r=await http_snapshot(target); h={k.lower():v for k,v in r.headers.items()}; text=r.text[:200000]
-    tech=[]
-    if "server" in h: tech.append({"name":"server","value":h["server"]})
-    if "x-powered-by" in h: tech.append({"name":"x-powered-by","value":h["x-powered-by"]})
-    for name,pat in (("WordPress",r"wp-content|wp-includes"),("React",r"__react|reactroot"),("Next.js",r"__next_f|_next/static"),("Django",r"csrfmiddlewaretoken")):
-        if re.search(pat,text,re.I): tech.append({"name":name,"confidence":0.7})
+    r = await http_snapshot(target)
+    h = {k.lower(): v for k, v in r.headers.items()}
+    text = r.text[:200000]
+    tech = []
+    for header in ("server", "x-powered-by"):
+        fp = fingerprint_from_header(header, h.get(header, ""))
+        if fp:
+            tech.append(fp)
+        elif h.get(header):
+            tech.append({"product": h[header].split("/", 1)[0].strip(), "version": None, "source": header, "cpe": None, "confidence": 0.4})
+    for name, pat in (("WordPress", r"wp-content|wp-includes"), ("React", r"__react|reactroot"), ("Next.js", r"__next_f|_next/static"), ("Django", r"csrfmiddlewaretoken")):
+        if re.search(pat, text, re.I):
+            tech.append({"product": name, "version": None, "vendor": None, "cpe": None, "source": "html", "confidence": 0.7})
     return base("technology_detection", technologies=tech)
 
 
