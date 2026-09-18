@@ -51,7 +51,8 @@ async def port_scanner(target):
     for port in COMMON_PORTS:
         try:
             bounded_connect(host, port)
-            results.append({"port": port, "state": "open"})
+            services = {21: "ftp", 22: "ssh", 25: "smtp", 53: "dns", 80: "http", 110: "pop3", 143: "imap", 443: "https", 445: "smb", 587: "smtp-submission", 993: "imaps", 995: "pop3s", 3306: "mysql", 5432: "postgresql", 6379: "redis", 8080: "http-alt", 8443: "https-alt"}
+            results.append({"port": port, "protocol": "tcp", "service": services.get(port), "state": "open"})
         except OSError:
             pass
         except RuntimeError:
