@@ -97,6 +97,23 @@ async def ingest_scan_observations(db, scan: Scan, result: dict) -> None:
                 service_row.state, service_row.source_scan_id = 'closed', scan.id
     subdomains = result.get('subdomains', []) or []
     if subdomains: await _history(db, asset, 'discovery.subdomains', {'count': len(subdomains), 'hosts': [x.get('host') for x in subdomains[:100]]}, scan.id); changed = True
+
+    endpoints = result.get('endpoints', []) or []
+    if endpoints:
+        normalized_endpoints = [str(item).strip() for item in endpoints[:500] if str(item).strip()]
+        await _history(db, asset, 'discovery.endpoints', {'count': len(normalized_endpoints), 'endpoints': normalized_endpoints}, scan.id)
+        changed = True
+
+    records = result.get('records', []) or []
+    if records:
+        normalized_records = [
+            {'type': str(item.get('type', 'unknown')), 'value': str(item.get('value', '')).strip()}
+            for item in records[:200]
+            if isinstance(item, dict) and str(item.get('value', '')).strip()
+        ]
+        if normalized_records:
+            await _history(db, asset, 'discovery.dns', {'count': len(normalized_records), 'records': normalized_records}, scan.id)
+            changed = True
     technologies = result.get("technologies", []) or []
     for tech in technologies[:100]:
         product = str(tech.get("product") or tech.get("name") or "").strip()
