@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
@@ -253,21 +253,76 @@ async def get_topology(
             if key in endpoint_seen:
                 edges.append(_edge(endpoint_id, finding_id, "has-finding", label=finding.severity))
 
-    # Reconstruct observed subdomain relationships from asset discovery history.
+    # Reconstruct DNS, endpoint and subdomain relationships from persisted scan observations.
     histories = (await db.scalars(
         select(AssetHistory).where(
             AssetHistory.workspace_id == principal.workspace_id,
             AssetHistory.asset_id.in_(asset_ids),
-            AssetHistory.event_type == "discovery.subdomains",
+            AssetHistory.event_type.in_([
+                "discovery.subdomains", "discovery.endpoints", "discovery.dns",
+            ]),
         ).order_by(AssetHistory.created_at.desc())
     )).all()
     by_host = {a.host: a for a in assets}
+    endpoint_history_seen: set[tuple[str, str]] = set()
     for history in histories:
-        for raw_host in (history.metadata_json or {}).get("hosts", []) or []:
-            child = by_host.get(str(raw_host).rstrip(".").lower())
-            parent = by_host.get(history.asset_id)
-            if child and parent and child.id != parent.id and child.id in asset_node_ids and parent.id in asset_node_ids:
-                edges.append(_edge(asset_node_ids[parent.id], asset_node_ids[child.id], "subdomain", label="discovered"))
+        asset_node = asset_node_ids.get(history.asset_id)
+        if not asset_node:
+            continue
+        metadata = history.metadata_json or {}
+        if history.event_type == "discovery.subdomains":
+            for raw_host in metadata.get("hosts", []) or []:
+                child = by_host.get(str(raw_host).rstrip(".").lower())
+                parent = by_host.get(history.asset_id)
+                if child and parent and child.id != parent.id and child.id in asset_node_ids and parent.id in asset_node_ids:
+                    edges.append(_edge(asset_node_ids[parent.id], asset_node_ids[child.id], "subdomain", label="discovered"))
+        elif history.event_type == "discovery.dns":
+            for record in metadata.get("records", []) or []:
+                if not isinstance(record, dict):
+                    continue
+                value = str(record.get("value", "")).strip()
+                if not value:
+                    continue
+                dns_id = f"dns-record:{history.asset_id}:{record.get('type', 'unknown')}:{value}"
+                if passes_filter("dns", value):
+                    if not any(n["id"] == dns_id for n in nodes):
+                        nodes.append(_node(
+                            dns_id, "dns", value, asset_id=history.asset_id,
+                            subtitle=str(record.get("type", "DNS")), risk="info",
+                        ))
+                    edges.append(_edge(asset_node, dns_id, "dns-record", label=str(record.get("type", "DNS"))))
+        elif history.event_type == "discovery.endpoints":
+            for raw_endpoint in metadata.get("endpoints", []) or []:
+                endpoint = str(raw_endpoint).strip()
+                key = (history.asset_id, endpoint)
+                if not endpoint or key in endpoint_history_seen:
+                    continue
+                endpoint_history_seen.add(key)
+                endpoint_id = f"endpoint-history:{history.asset_id}:{abs(hash(endpoint))}"
+                if passes_filter("endpoint", endpoint):
+                    if not any(n["id"] == endpoint_id for n in nodes):
+                        nodes.append(_node(
+                            endpoint_id, "endpoint", endpoint, asset_id=history.asset_id,
+                            risk="info", finding_count=0,
+                        ))
+                    edges.append(_edge(asset_node, endpoint_id, "serves", label="scanner inventory"))
+
+    # Attach every observed finding to its asset, regardless of whether it has a port or endpoint.
+    for finding in findings:
+        scan = next((s for s in scans if s.id == finding.scan_id), None)
+        if not scan or scan.asset_id not in asset_node_ids:
+            continue
+        if not passes_filter("finding", finding.title, finding.severity):
+            continue
+        finding_id = f"finding:{finding.id}"
+        if not any(n["id"] == finding_id for n in nodes):
+            nodes.append(_node(
+                finding_id, "finding", finding.title,
+                finding_id_ref=finding.id, asset_id=scan.asset_id,
+                severity=finding.severity, risk=finding.severity,
+                status=finding.status, fingerprint=finding.fingerprint,
+            ))
+        edges.append(_edge(asset_node_ids[scan.asset_id], finding_id, "has-finding", label=finding.severity))
 
     # Delta annotations are derived from the selected scan's immutable finding fingerprints.
     if selected_scan:
