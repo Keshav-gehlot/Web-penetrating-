@@ -317,7 +317,7 @@ function Select({ value, onChange, options, labels, label }: { value: string; on
   return <label className="relative h-8 border border-phantom-border rounded-lg bg-phantom-panel text-[10px]">
     <span className="sr-only">{label}</span>
     <select value={value} onChange={event => onChange(event.target.value)} className="h-full pl-2 pr-7 bg-transparent outline-none appearance-none max-w-[150px]">
-      {options.map((option, index) => <option key={option} value={option}>{labels?.[index] ?? option === 'all' ? label : option}</option>)}
+      {options.map((option, index) => <option key={option} value={option}>{labels?.[index] ?? (option === 'all' ? label : option)}</option>)}
     </select>
     <ChevronDown size={12} className="absolute right-2 top-2.5 pointer-events-none text-phantom-text-tertiary"/>
   </label>;
