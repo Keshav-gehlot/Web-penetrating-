@@ -118,6 +118,9 @@ async def get_topology(
         selected_findings = (await db.scalars(
             select(Finding).where(Finding.scan_id == selected_scan.id)
         )).all()
+        # Timeline mode renders the selected observation set rather than mixing it
+        # with findings from every scan in the workspace.
+        findings = selected_findings
         current_fingerprints = {f.fingerprint for f in selected_findings}
         if previous_scan:
             previous_rows = (await db.scalars(
