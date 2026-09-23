@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib, secrets
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -35,8 +36,31 @@ async def login(payload:LoginRequest,request:Request,db:AsyncSession=Depends(get
     if not user or not user.is_active: raise HTTPException(401,"Invalid credentials")
     now=_now()
     if user.locked_until and user.locked_until>now: raise HTTPException(429,"Account temporarily locked. Try again later.")
-    valid=verify_password(payload.password,user.password_hash)
-    if not valid and is_legacy_sha256(user.password_hash): valid=verify_legacy_sha256(payload.password,user.password_hash); user.password_hash=hash_password(payload.password) if valid else user.password_hash
+    if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+        raise HTTPException(503,"Authentication service is not configured")
+    auth_url=settings.SUPABASE_URL.rstrip("/")+"/functions/v1/phantom-auth"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            auth_response=await client.post(
+                auth_url,
+                json={"email":email,"password":payload.password},
+                headers={
+                    "Authorization":f"Bearer {settings.SUPABASE_ANON_KEY}",
+                    "apikey":settings.SUPABASE_ANON_KEY,
+                    "Content-Type":"application/json",
+                },
+            )
+        if auth_response.status_code == 200:
+            auth_result=auth_response.json()
+            valid=bool(auth_result.get("valid")) and str(auth_result.get("user_id","")) == str(user.id)
+        elif auth_response.status_code == 401:
+            valid=False
+        else:
+            raise HTTPException(503,"Authentication service unavailable")
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(503,"Authentication service unavailable")
     if not valid:
         user.failed_login_count += 1
         if user.failed_login_count>=MAX_FAILURES: user.locked_until=now+timedelta(minutes=LOCK_MINUTES); user.failed_login_count=0
