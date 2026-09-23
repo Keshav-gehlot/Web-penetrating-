@@ -29,14 +29,9 @@ async def check_database() -> bool:
 
 
 async def init_db() -> None:
-    # Bootstrap credentials are retained for first-user provisioning and are
-    # mirrored into the isolated authentication store at startup.
-    from .models import Organization, User, Workspace, WorkspaceMember  # noqa: F401
+    from .models import Organization, User, Workspace, WorkspaceMember
     from .security import hash_password
-    from .auth_store import ensure_auth_store, provision_user
     from uuid import uuid4
-
-    await ensure_auth_store()
 
     async with SessionLocal() as db:
         org = await db.scalar(select(Organization).where(Organization.slug == "phantom"))
