@@ -17,6 +17,8 @@ class Settings:
     APP_NAME=os.getenv("PHANTOM_APP_NAME","PHANTOM Security API")
     DATABASE_URL=_normalize_database_url(os.getenv("DATABASE_URL","postgresql+asyncpg://postgres:postgres@localhost:5432/phantom"))
     CORS_ORIGINS=[x.strip() for x in os.getenv("PHANTOM_CORS_ORIGINS","http://localhost:5173").split(",") if x.strip()]
+    SUPABASE_URL=os.getenv("SUPABASE_URL","")
+    SUPABASE_ANON_KEY=os.getenv("SUPABASE_ANON_KEY","")
     AUTH_SECRET=os.getenv("PHANTOM_AUTH_SECRET","change-this-development-secret")
     BOOTSTRAP_EMAIL=os.getenv("PHANTOM_BOOTSTRAP_EMAIL","admin@phantom.local")
     BOOTSTRAP_PASSWORD=os.getenv("PHANTOM_BOOTSTRAP_PASSWORD","change-me-before-production")
