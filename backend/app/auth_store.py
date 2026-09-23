@@ -26,7 +26,6 @@ async def ensure_auth_store() -> None:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
-        await connection.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{'phantom_auth_users_email' if not _IS_POSTGRES else 'phantom_auth_users_email'} ON {_TABLE} (email)"))
 
 
 async def provision_user(user_id: str, email: str, password_hash: str, is_active: bool = True) -> None:
