@@ -138,7 +138,7 @@ export default function Topology() {
     return result;
   }, [visibleNodes]);
 
-  const graphHeight = Math.max(720, ...Array.from(positions.values()).map(position => position.y + 90));
+  const graphHeight = Math.max(720, ...Array.from(positions.values() as Iterable<{ x: number; y: number }>).map(position => position.y + 90));
   const selectedFindings = useMemo(() => {
     if (!selected) return [];
     if (selected.type === 'finding') return [selected];
