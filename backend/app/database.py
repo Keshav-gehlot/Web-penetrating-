@@ -73,4 +73,11 @@ async def init_db() -> None:
         if not membership:
             db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=settings.BOOTSTRAP_ROLE))
 
+        # Explicit one-time recovery for the bootstrap administrator.
+        # Remove this branch and disable the flag immediately after recovery.
+        import os
+        if os.getenv("PHANTOM_RESET_BOOTSTRAP_PASSWORD", "").lower() == "true":
+            user.password_hash = hash_password(settings.BOOTSTRAP_PASSWORD)
+            user.is_active = True
+
         await db.commit()
