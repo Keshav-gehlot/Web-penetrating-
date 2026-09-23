@@ -230,7 +230,7 @@ The monitor is intentionally an observability layer. It does not inject packets,
 
 ## Authentication and authorization
 
-PHANTOM uses signed bearer sessions. Every authenticated request revalidates the user and workspace membership against PostgreSQL, so a stale client-side role cannot grant access.
+PHANTOM uses a dedicated authentication store for credential verification and signed bearer sessions. Every authenticated request revalidates the user and workspace membership against PostgreSQL, so a stale client-side role cannot grant access.
 
 Roles:
 
