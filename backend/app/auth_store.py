@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from urllib.parse import urlsplit, urlunsplit
 
 from .config import settings
 from .security import verify_password
@@ -28,11 +29,18 @@ async def ensure_auth_database() -> None:
     if not settings.AUTH_DATABASE_SAME_SERVER or not _IS_POSTGRES:
         return
 
-    admin_url = settings.AUTH_DATABASE_URL
-    parts = admin_url.rsplit("/", 1)
-    if len(parts) != 2:
+    parts = urlsplit(settings.AUTH_DATABASE_URL)
+    if not parts.scheme or not parts.netloc:
         raise RuntimeError("Invalid authentication database URL")
-    base_url = parts[0] + "/" + settings.AUTH_DATABASE_ADMIN_DATABASE
+    base_url = urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            "/" + settings.AUTH_DATABASE_ADMIN_DATABASE,
+            parts.query,
+            parts.fragment,
+        )
+    )
 
     admin_engine = create_async_engine(
         base_url,
