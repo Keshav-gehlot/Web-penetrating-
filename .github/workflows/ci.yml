@@ -2,7 +2,7 @@ name: PHANTOM CI
 
 on:
   push:
-    branches: [phantom-v2]
+    branches: [phantom-v2-production]
   pull_request:
     branches: [phantom-v2]
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Activity, Server, Crosshair, ShieldAlert, FileText, Settings, Users, Search, TerminalSquare, Network, FlaskConical, Radar, LogOut, Radio, Gauge, CalendarClock, LockKeyhole } from 'lucide-react';
+import { Activity, Server, Crosshair, ShieldAlert, FileText, Settings, Users , Search, TerminalSquare, Network, FlaskConical, Radar, LogOut, Radio, Gauge, CalendarClock, LockKeyhole } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { getSession, logout } from '../lib/auth';
@@ -45,11 +45,6 @@ export function NavigationRail() {
           <div className="absolute inset-y-0 w-0.5 bg-phantom-text-primary rounded-full group-hover:bg-phantom-cyan transition-colors" />
           <div className="absolute w-3 h-3 border-2 border-phantom-text-primary rounded-sm rotate-45 group-hover:border-phantom-cyan transition-colors" />
         </div>
-      </div>
-      <div className="flex flex-col gap-3 w-full items-center mb-6">
-        <button className="w-10 h-10 rounded-xl flex items-center justify-center text-phantom-text-tertiary hover:text-phantom-text-primary hover:bg-phantom-surface transition-all duration-200" title="Search">
-          <Search size={20} />
-        </button>
       </div>
       <div className="flex flex-col gap-2 w-full items-center flex-1 overflow-y-auto">
         {NAV_ITEMS.filter(visible).map(item => <NavItem key={item.path} item={item} />)}

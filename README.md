@@ -230,7 +230,7 @@ The monitor is intentionally an observability layer. It does not inject packets,
 
 ## Authentication and authorization
 
-PHANTOM uses a dedicated authentication store for credential verification and signed bearer sessions. Every authenticated request revalidates the user and workspace membership against PostgreSQL, so a stale client-side role cannot grant access.
+PHANTOM uses PostgreSQL as the single source of truth for credentials and signed bearer sessions. Every authenticated request revalidates the user and workspace membership against PostgreSQL, so a stale client-side role cannot grant access.
 
 Roles:
 
@@ -402,7 +402,7 @@ GitHub Actions runs the backend and frontend validation for **`phantom-v2`**, th
 │   ├── app/
 │   │   ├── api/             # REST and WebSocket routes
 │   │   ├── scanners/        # Bounded assessment modules/runtime
-│   │   ├── auth.py          # Sessions and WS tickets
+│   │   ├── auth.py          # Sessions, password auth, and WS tickets
 │   │   ├── database.py      # Async DB sessions/bootstrap
 │   │   ├── middleware.py    # Request IDs/logging/security headers
 │   │   ├── models.py        # SQLAlchemy models
@@ -427,13 +427,13 @@ GitHub Actions runs the backend and frontend validation for **`phantom-v2`**, th
 
 ## Branch
 
-PHANTOM development is maintained on:
+PHANTOM production is maintained on:
 
 ```text
-phantom-v2
+phantom-v2-production
 ```
 
-No additional PHANTOM development branch is required.
+Railway production deploys from this branch.
 
 ## Originality and dependencies
 

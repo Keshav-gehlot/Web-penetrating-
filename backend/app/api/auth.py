@@ -6,12 +6,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import LoginRequest, Principal, issue_token, current_principal, new_totp_secret, verify_totp
-from ..auth_store import set_password, verify_credentials
 from ..database import get_db
 from ..models import User, WorkspaceMember, AuthSession, PasswordResetToken, EmailVerificationToken, AuthInvitation
 from ..rbac import Role
 from ..config import settings
-from ..security import hash_password
+from ..security import hash_password, is_legacy_sha256, verify_legacy_sha256, verify_password
 from .audit import record_audit
 
 router=APIRouter(prefix="/api/v1/auth",tags=["auth"])
@@ -50,11 +49,11 @@ async def login(payload:LoginRequest,request:Request,db:AsyncSession=Depends(get
     if not user or not user.is_active: raise HTTPException(401,"Invalid credentials")
     now=_now()
     if user.locked_until and user.locked_until>now: raise HTTPException(429,"Account temporarily locked. Try again later.")
-    try:
-        valid=await verify_credentials(email,payload.password)
-    except Exception as exc:
-        print(f"PHANTOM auth store unavailable: {exc.__class__.__name__}", flush=True)
-        raise HTTPException(503,"Authentication service unavailable")
+    valid = verify_password(payload.password, user.password_hash)
+    if not valid and is_legacy_sha256(user.password_hash):
+        valid = verify_legacy_sha256(payload.password, user.password_hash)
+        if valid:
+            user.password_hash = hash_password(payload.password)
     if not valid:
         user.failed_login_count += 1
         if user.failed_login_count>=MAX_FAILURES:
@@ -134,11 +133,10 @@ async def revoke_all(principal:Principal=Depends(current_principal),request:Requ
 async def change_password(payload:PasswordChangeRequest,principal:Principal=Depends(current_principal),request:Request=None,db:AsyncSession=Depends(get_db)):
     user=await db.get(User,principal.user_id)
     if not user: raise HTTPException(404,"User not found")
-    if not await verify_credentials(user.email,payload.current_password): raise HTTPException(400,"Current password is incorrect")
+    if not (verify_password(payload.current_password, user.password_hash) or (is_legacy_sha256(user.password_hash) and verify_legacy_sha256(payload.current_password, user.password_hash))): raise HTTPException(400,"Current password is incorrect")
     if payload.current_password==payload.new_password: raise HTTPException(400,"New password must differ from current password")
     new_hash=hash_password(payload.new_password)
     user.password_hash=new_hash
-    await set_password(user.email,user.id,new_hash)
     rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.id!=principal.session_id,AuthSession.revoked_at.is_(None)))
     for s in rows.all(): s.revoked_at=_now()
     await record_audit(db,request,"auth.password_changed","user",user.id,None,principal)
@@ -164,7 +162,6 @@ async def reset_confirm(payload:PasswordResetConfirm,request:Request,db:AsyncSes
     if not user: raise HTTPException(404,"User not found")
     new_hash=hash_password(payload.new_password)
     user.password_hash=new_hash
-    await set_password(user.email,user.id,new_hash)
     row.used_at=_now()
     rows=await db.scalars(select(AuthSession).where(AuthSession.user_id==user.id,AuthSession.revoked_at.is_(None)))
     for s in rows.all(): s.revoked_at=_now()
@@ -212,7 +209,6 @@ async def accept_invitation(payload:InvitationAccept,request:Request,db:AsyncSes
     else:
         new_hash=hash_password(payload.password)
         user.password_hash=new_hash; user.is_active=True
-    await set_password(user.email,user.id,new_hash)
     member=WorkspaceMember(workspace_id=row.workspace_id,user_id=user.id,role=row.role); db.add(member); row.accepted_at=_now()
     await record_audit(db,request,"auth.invitation_accepted","auth_invitation",row.id,{"email":row.email,"role":row.role},actor=row.email)
     await db.commit()

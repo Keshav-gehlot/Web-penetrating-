@@ -77,12 +77,3 @@ async def init_db() -> None:
             db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=settings.BOOTSTRAP_ROLE))
 
         await db.commit()
-
-        users = await db.scalars(select(User))
-        for existing_user in users.all():
-            await provision_user(
-                existing_user.id,
-                existing_user.email,
-                existing_user.password_hash,
-                existing_user.is_active,
-            )
