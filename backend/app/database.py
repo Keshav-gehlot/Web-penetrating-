@@ -29,12 +29,14 @@ async def check_database() -> bool:
 
 
 async def init_db() -> None:
-    # Bootstrap credentials are retained only for first-user provisioning; login uses the dedicated auth store.
-    # Schema ownership belongs to Alembic. Application startup only performs
-    # deterministic seed/bootstrap work and does not mutate table definitions.
+    # Bootstrap credentials are retained for first-user provisioning and are
+    # mirrored into the isolated authentication store at startup.
     from .models import Organization, User, Workspace, WorkspaceMember  # noqa: F401
     from .security import hash_password
+    from .auth_store import ensure_auth_store, provision_user
     from uuid import uuid4
+
+    await ensure_auth_store()
 
     async with SessionLocal() as db:
         org = await db.scalar(select(Organization).where(Organization.slug == "phantom"))
@@ -75,3 +77,12 @@ async def init_db() -> None:
             db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role=settings.BOOTSTRAP_ROLE))
 
         await db.commit()
+
+        users = await db.scalars(select(User))
+        for existing_user in users.all():
+            await provision_user(
+                existing_user.id,
+                existing_user.email,
+                existing_user.password_hash,
+                existing_user.is_active,
+            )
