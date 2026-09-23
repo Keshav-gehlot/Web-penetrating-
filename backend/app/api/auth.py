@@ -9,7 +9,6 @@ from ..auth import LoginRequest, Principal, issue_token, current_principal, new_
 from ..config import settings
 from ..database import get_db
 from ..models import User, WorkspaceMember, AuthSession, PasswordResetToken, EmailVerificationToken, AuthInvitation
-from ..security import hash_password, is_legacy_sha256, verify_legacy_sha256, verify_password
 from .audit import record_audit
 router=APIRouter(prefix="/api/v1/auth",tags=["auth"])
 LOCK_MINUTES=15
