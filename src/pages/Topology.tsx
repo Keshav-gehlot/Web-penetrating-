@@ -127,7 +127,7 @@ export default function Topology() {
 
   const visibleNodes = data?.nodes ?? [];
   const nodeMap = useMemo(() => new Map(visibleNodes.map(node => [node.id, node])), [visibleNodes]);
-  const positions = useMemo(() => {
+  const positions = useMemo<Map<string, { x: number; y: number }>>(() => {
     const counts: Record<string, number> = {};
     const result = new Map<string, { x: number; y: number }>();
     for (const node of visibleNodes) {
