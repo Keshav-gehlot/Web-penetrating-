@@ -1,9 +1,21 @@
 from __future__ import annotations
 import os
+from urllib.parse import urlsplit, urlunsplit
+
+
+def _normalize_database_url(value: str) -> str:
+    """Ensure SQLAlchemy async engines receive an asyncpg PostgreSQL URL."""
+    value = value.strip()
+    if value.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + value[len("postgresql://"):]
+    if value.startswith("postgres://"):
+        return "postgresql+asyncpg://" + value[len("postgres://"):]
+    return value
+
 
 class Settings:
     APP_NAME=os.getenv("PHANTOM_APP_NAME","PHANTOM Security API")
-    DATABASE_URL=os.getenv("DATABASE_URL","postgresql+asyncpg://postgres:postgres@localhost:5432/phantom")
+    DATABASE_URL=_normalize_database_url(os.getenv("DATABASE_URL","postgresql+asyncpg://postgres:postgres@localhost:5432/phantom"))
     CORS_ORIGINS=[x.strip() for x in os.getenv("PHANTOM_CORS_ORIGINS","http://localhost:5173").split(",") if x.strip()]
     AUTH_SECRET=os.getenv("PHANTOM_AUTH_SECRET","change-this-development-secret")
     BOOTSTRAP_EMAIL=os.getenv("PHANTOM_BOOTSTRAP_EMAIL","admin@phantom.local")
