@@ -29,6 +29,7 @@ async def check_database() -> bool:
 
 
 async def init_db() -> None:
+    # Bootstrap credentials are retained only for first-user provisioning; login uses the dedicated auth store.
     # Schema ownership belongs to Alembic. Application startup only performs
     # deterministic seed/bootstrap work and does not mutate table definitions.
     from .models import Organization, User, Workspace, WorkspaceMember  # noqa: F401
