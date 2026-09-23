@@ -36,6 +36,7 @@ async def readiness():
     database = await database_ready()
     redis = await redis_ready()
     ready = database and redis
+    print(f"PHANTOM readiness database={database} redis={redis}", flush=True)
     payload = {
         "status": "ready" if ready else "not_ready",
         "dependencies": {"database": database, "redis": redis},
