@@ -38,6 +38,7 @@ class Settings:
     MAX_JOB_ATTEMPTS=max(1,int(os.getenv("PHANTOM_MAX_JOB_ATTEMPTS","3")))
     WS_TICKET_TTL_SECONDS=max(30,int(os.getenv("PHANTOM_WS_TICKET_TTL_SECONDS","60")))
 
+# Dedicated PHANTOM authentication store
 settings=Settings()
 if settings.ENVIRONMENT in {"production","prod"} and settings.AUTH_SECRET == "change-this-development-secret":
     raise RuntimeError("PHANTOM_AUTH_SECRET must be replaced before production startup")
