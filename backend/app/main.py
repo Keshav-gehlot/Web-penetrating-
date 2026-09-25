@@ -12,7 +12,7 @@ from .security_scope import resolve_public_host,validate_target
 @asynccontextmanager
 async def lifespan(app:FastAPI):
  await init_db();yield
-app=FastAPI(title=settings.APP_NAME,version="2.0.0",description="PHANTOM Security Operations API for authorized, bounded security assessments.",docs_url="/docs" if settings.ENVIRONMENT!="production" else None,redoc_url="/redoc" if settings.ENVIRONMENT!="production" else None)
+app=FastAPI(title=settings.APP_NAME,version="2.0.0",description="PHANTOM Security Operations API for authorized, bounded security assessments.",docs_url="/docs" if settings.ENVIRONMENT!="production" else None,redoc_url="/redoc" if settings.ENVIRONMENT!="production" else None,lifespan=lifespan)
 app.add_middleware(RequestContextMiddleware);app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Request-ID"])
 class TargetRequest(BaseModel): target:str=Field(min_length=1,max_length=2048)
 @app.get("/health")
