@@ -1,5 +1,5 @@
 import { authHeaders } from './auth';
-const API_BASE=(import.meta.env.VITE_PHANTOM_API_URL??'http://localhost:8000').replace(/\/$/,'');
+const API_BASE=(import.meta.env.VITE_PHANTOM_API_URL??(import.meta.env.PROD?'':'http://localhost:8000')).replace(/\/$/,'');
 export type ScanProfile='quick'|'standard'|'deep'|'trust';
 export type Scan={id:string;target:string;host:string;profile:string;modules:string[];status:string;created_at:string|null;started_at:string|null;completed_at:string|null;error?:string|null;attempt?:number;worker_id?:string|null;lease_expires_at?:string|null;cancel_requested_at?:string|null;cancelled_at?:string|null};
 export type FindingEvent={id:string;module:string;title:string;severity:string;confidence:number};
@@ -8,4 +8,4 @@ async function request<T>(path:string,init?:RequestInit):Promise<T>{const respon
 export function createScan(target:string,profile:ScanProfile='standard'){return request<Scan>('/api/v1/scans',{method:'POST',body:JSON.stringify({target,profile})})}
 export function getScan(scanId:string){return request<Scan&{findings:FindingEvent[]}>(`/api/v1/scans/${encodeURIComponent(scanId)}`)}
 export function cancelScan(scanId:string){return request<Scan>(`/api/v1/scans/${encodeURIComponent(scanId)}/cancel`,{method:'POST'})}
-export async function scanSocket(scanId:string):Promise<WebSocket>{const ticket=await request<{ticket:string}>(`/api/v1/events/ws-ticket?scan_id=${encodeURIComponent(scanId)}`,{method:'POST'});const base=new URL(API_BASE);base.protocol=base.protocol==='https:'?'wss:':'ws:';base.pathname=`/ws/scans/${encodeURIComponent(scanId)}`;base.search=`?ticket=${encodeURIComponent(ticket.ticket)}`;return new WebSocket(base.toString())}
+export async function scanSocket(scanId:string):Promise<WebSocket>{const ticket=await request<{ticket:string}>(`/api/v1/events/ws-ticket?scan_id=${encodeURIComponent(scanId)}`,{method:'POST'});const base=new URL(API_BASE || window.location.origin);base.protocol=base.protocol==='https:'?'wss:':'ws:';base.pathname=`/ws/scans/${encodeURIComponent(scanId)}`;base.search=`?ticket=${encodeURIComponent(ticket.ticket)}`;return new WebSocket(base.toString())}
