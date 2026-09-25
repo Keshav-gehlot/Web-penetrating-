@@ -3,22 +3,12 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from urllib.parse import quote
-
 from redis.asyncio import Redis
 
 
 def _redis_url() -> str:
-    configured = os.getenv("PHANTOM_REDIS_URL", "").strip()
-    password = os.getenv("REDIS_PASSWORD", "").strip()
-
-    # Railway's Redis service is private. Prefer its service password when
-    # available so a stale/missing PHANTOM_REDIS_URL cannot silently fall back
-    # to localhost in production.
-    if os.getenv("PHANTOM_ENV", "development").lower() in {"production", "prod"} and password:
-        return f"redis://:{quote(password, safe='')}@redis.railway.internal:6379/0"
-
-    return configured or "redis://localhost:6379/0"
+    """Return the configured Redis endpoint without reconstructing credentials."""
+    return os.getenv("PHANTOM_REDIS_URL", "").strip() or "redis://localhost:6379/0"
 
 
 REDIS_URL = _redis_url()
