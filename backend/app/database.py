@@ -61,6 +61,7 @@ async def init_db() -> None:
             )
             db.add(user)
             await db.flush()
+            print("PHANTOM bootstrap account created", flush=True)
         elif not verify_password(settings.BOOTSTRAP_PASSWORD, user.password_hash):
             # The bootstrap account is deployment-managed. Keep its stored hash in
             # sync with the configured bootstrap credential so rotating the Railway
@@ -68,6 +69,9 @@ async def init_db() -> None:
             user.password_hash = hash_password(settings.BOOTSTRAP_PASSWORD)
             user.is_active = True
             await db.flush()
+            print("PHANTOM bootstrap credential reconciled", flush=True)
+        else:
+            print("PHANTOM bootstrap credential already synchronized", flush=True)
 
         membership = await db.scalar(
             select(WorkspaceMember).where(
