@@ -2,6 +2,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Principal
 from ..database import get_db
@@ -19,7 +20,7 @@ async def current(principal:Principal=Depends(require_permission("scan:view")),d
     return {"id":principal.workspace_id,"name":"PHANTOM Security Workspace","actor":principal.actor,"role":principal.role,"members":count}
 @router.get("/current/members")
 async def members(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
-    rows=await db.scalars(select(WorkspaceMember).where(WorkspaceMember.workspace_id==principal.workspace_id));return [{"id":m.id,"email":m.user.email,"name":m.user.display_name,"role":m.role,"active":m.user.is_active} for m in rows.all()]
+    rows=await db.scalars(select(WorkspaceMember).options(selectinload(WorkspaceMember.user)).where(WorkspaceMember.workspace_id==principal.workspace_id));return [{"id":m.id,"email":m.user.email,"name":m.user.display_name,"role":m.role,"active":m.user.is_active} for m in rows.all()]
 @router.post("/current/members")
 async def add_member(payload:MemberCreate,request:Request,principal:Principal=Depends(require_permission("users:manage")),db:AsyncSession=Depends(get_db)):
     email=payload.email.strip().lower();user=await db.scalar(select(User).where(User.email==email))
