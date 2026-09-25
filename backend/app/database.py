@@ -30,7 +30,7 @@ async def check_database() -> bool:
 
 async def init_db() -> None:
     from .models import Organization, User, Workspace, WorkspaceMember
-    from .security import hash_password
+    from .security import hash_password, verify_password
     from uuid import uuid4
 
     async with SessionLocal() as db:
@@ -60,6 +60,13 @@ async def init_db() -> None:
                 is_active=True,
             )
             db.add(user)
+            await db.flush()
+        elif not verify_password(settings.BOOTSTRAP_PASSWORD, user.password_hash):
+            # The bootstrap account is deployment-managed. Keep its stored hash in
+            # sync with the configured bootstrap credential so rotating the Railway
+            # secret cannot permanently lock the administrator out.
+            user.password_hash = hash_password(settings.BOOTSTRAP_PASSWORD)
+            user.is_active = True
             await db.flush()
 
         membership = await db.scalar(
