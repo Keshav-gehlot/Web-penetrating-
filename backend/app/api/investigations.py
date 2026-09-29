@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.audit import AuditEvent, record_audit
 from ..auth import Principal
 from ..database import get_db
-from ..models import Asset, AssetHistory, AssetService, Finding, FindingNote, Scan
+from ..models import Asset, AssetHistory, AssetService, Finding, FindingNote, NetWatchEvent, Scan
 from ..rbac import require_permission
 
 router = APIRouter(prefix="/api/v1/investigations", tags=["investigations"])
@@ -191,6 +191,8 @@ async def investigation(
     )
     audit_history = [serialize_audit(event) for event in audit_rows.all()]
 
+    net_rows = (await db.scalars(select(NetWatchEvent).where(NetWatchEvent.workspace_id == principal.workspace_id, NetWatchEvent.finding_id == finding.id).order_by(NetWatchEvent.created_at.desc()).limit(100))).all()
+    net_watch = [{"id": e.id, "kind": e.kind, "severity": e.severity, "summary": e.summary, "explanation": e.explanation, "at": e.created_at.isoformat() if e.created_at else None} for e in net_rows]
     request_payload, response_payload = payload_parts(finding.evidence)
     timeline = [
         {
@@ -222,6 +224,7 @@ async def investigation(
         "at": event["created_at"],
         "metadata": event["metadata"],
     } for event in audit_history)
+    timeline.extend({"id": f"net-watch-{event['id']}", "event": "net_watch", "actor": None, "at": event["at"], "metadata": event} for event in net_watch)
     timeline.extend({
         "id": f"asset-{event['id']}",
         "event": event["event_type"],
@@ -275,6 +278,7 @@ async def investigation(
         "notes": notes,
         "timeline": timeline,
         "audit_history": audit_history,
+        "net_watch": net_watch,
         "requests": [{"source": "finding.evidence", "payload": request_payload}],
         "responses": [{"source": "finding.evidence", "payload": response_payload}],
     }
