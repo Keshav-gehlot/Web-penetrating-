@@ -22,6 +22,7 @@ from .security_scope import scope_snapshot
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("phantom.worker")
 MAX_ATTEMPTS = settings.MAX_JOB_ATTEMPTS
+WORKER_VERSION = os.getenv("PHANTOM_WORKER_VERSION", "2.0.0")
 CONSUMER = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 HEARTBEAT_TTL = max(20, int(os.getenv("PHANTOM_WORKER_HEARTBEAT_TTL", "30")))
 
@@ -202,6 +203,7 @@ async def process_message(client, message_id: str, fields: dict[str, str]) -> No
                 await retry_or_fail(client, message_id, scan_id, attempt, "Worker heartbeat stopped unexpectedly")
                 return
             success = execution_task.result()
+            await client.hset(f"phantom:worker:registration:{CONSUMER}", mapping={"last_job": scan_id, "last_job_at": datetime.now(timezone.utc).isoformat()})
             async with SessionLocal() as db:
                 scan = await db.get(Scan, scan_id)
                 cancelled = bool(scan and scan.status == "cancelled")
@@ -247,6 +249,8 @@ async def main() -> None:
     client = redis_client()
     await ensure_consumer_group(client)
     heartbeat_key = f"phantom:worker:heartbeat:{CONSUMER}"
+    registration_key = f"phantom:worker:registration:{CONSUMER}"
+    await client.hset(registration_key, mapping={"version": WORKER_VERSION, "capacity": str(settings.MAX_CONCURRENT_SCANS), "started_at": datetime.now(timezone.utc).isoformat()})
     last_recovery = 0.0
     log.info("PHANTOM worker started stream=%s group=%s consumer=%s max_concurrent=%s", SCAN_STREAM, SCAN_GROUP, CONSUMER, settings.MAX_CONCURRENT_SCANS)
     await _op("worker.started", "PHANTOM worker started", metadata={"worker_id": CONSUMER, "max_concurrent": settings.MAX_CONCURRENT_SCANS})
@@ -269,6 +273,7 @@ async def main() -> None:
     finally:
         await _op("worker.stopped", "PHANTOM worker stopped", severity="warning", metadata={"worker_id": CONSUMER})
         await client.delete(heartbeat_key)
+        await client.delete(registration_key)
         await client.aclose()
 
 

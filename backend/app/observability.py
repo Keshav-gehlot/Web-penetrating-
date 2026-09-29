@@ -32,6 +32,7 @@ async def record_operational_event(
     workspace_id: str | None = None,
     scan_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     """Best-effort operational telemetry; telemetry failures must not break security workflows."""
     normalized_severity = str(severity).lower()
@@ -46,7 +47,7 @@ async def record_operational_event(
                     severity=safe_severity,
                     workspace_id=workspace_id,
                     scan_id=scan_id,
-                    db_metadata=_sanitize_metadata(metadata),
+                    db_metadata=_sanitize_metadata({**(metadata or {}), **({"correlation_id": correlation_id} if correlation_id else {})}),
                 )
             )
             await db.commit()

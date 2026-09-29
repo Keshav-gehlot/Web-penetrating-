@@ -13,7 +13,7 @@ from .api.audit import record_audit
 from .database import SessionLocal
 from .models import Asset, Scan, Schedule, WorkspaceScope
 from .observability import record_operational_event
-from .queue import enqueue_scan
+from .queue import enqueue_scan, redis_client
 from .scanners.runner import PROFILES
 from .security_scope import ScopeViolation, scope_snapshot, validate_target, validate_target_against_scope
 
@@ -101,8 +101,11 @@ async def dispatch_due() -> int:
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     log.info("PHANTOM scheduler started interval=%ss", INTERVAL)
-    while True:
+    client = redis_client()
+    try:
+      while True:
         try:
+            await client.set("phantom:scheduler:heartbeat", str(datetime.now(timezone.utc).timestamp()), ex=max(30, INTERVAL * 3))
             count = await dispatch_due()
             if count:
                 log.info("Dispatched %s scheduled scan(s)", count)
@@ -111,6 +114,9 @@ async def main() -> None:
         except Exception:
             log.exception("Scheduled dispatch cycle failed")
         await asyncio.sleep(INTERVAL)
+    finally:
+      await client.delete("phantom:scheduler:heartbeat")
+      await client.aclose()
 
 
 if __name__ == "__main__":
