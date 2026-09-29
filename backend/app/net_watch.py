@@ -9,7 +9,7 @@ from .database import SessionLocal
 from .models import Finding, NetWatchBaseline, NetWatchEvent, Scan, Workspace
 
 log=logging.getLogger("phantom.net_watch")
-_prev_connections:set[tuple]=set();_prev_processes:dict[int,dict[str,Any]]={};_prev_interfaces:dict[str,dict[str,Any]]={}
+_prev_connections:set[tuple]=set();_prev_processes:dict[int,dict[str,Any]]={};_prev_interfaces:dict[str,dict[str,Any]]={};_sample_no=0
 
 def _addr(a):
     if not a:return None
@@ -55,7 +55,8 @@ async def _correlate(db,workspace_id,event):
             event.finding_id=f.id;return
 
 async def collect_once():
-    global _prev_connections,_prev_processes,_prev_interfaces
+    global _prev_connections,_prev_processes,_prev_interfaces,_sample_no
+    _sample_no+=1
     snap=await asyncio.to_thread(snapshot);connections=snap["connections"];processes=snap["processes"];interfaces=snap["interfaces"]
     current_connections={_conn_key(c) for c in connections};opened=current_connections-_prev_connections if _prev_connections else set();closed=_prev_connections-current_connections if _prev_connections else set()
     conn_by_key={_conn_key(c):c for c in connections}
@@ -67,7 +68,7 @@ async def collect_once():
     if _prev_interfaces:
         for name,data in interfaces.items():
             old=_prev_interfaces.get(name)
-            if old is None or old.get("isup")!=data.get("isup"):interface_events.append({"name":name,**data,"previous_isup":old.get("isup") if old else None})
+            if old is None or old.get("isup")!=data.get("isup") or _sample_no%10==0:interface_events.append({"name":name,**data,"previous_isup":old.get("isup") if old else None,"periodic":bool(old and old.get("isup")==data.get("isup"))})
     async with SessionLocal() as db:
         workspaces=(await db.scalars(select(Workspace))).all()
         for ws in workspaces:
@@ -77,7 +78,7 @@ async def collect_once():
             for key in closed:
                 d={"pid":key[0],"local":key[1],"remote":key[2],"status":key[3],"action":"closed","sensor":snap["sensor"]};events.append(NetWatchEvent(workspace_id=ws.id,kind="connection",severity="info",summary="Connection closed",explanation=_explain("connection",d,{}),data=d,baseline={}))
             for d in proc_events:events.append(NetWatchEvent(workspace_id=ws.id,kind="process",severity="info",summary=f"Process {d['action']}",explanation=_explain("process",d,{}),data={**d,"sensor":snap["sensor"]},baseline={}))
-            for d in interface_events:events.append(NetWatchEvent(workspace_id=ws.id,kind="interface",severity="medium" if not d.get("isup") else "info",summary="Interface state changed",explanation=_explain("interface",d,{}),data={**d,"sensor":snap["sensor"]},baseline={}))
+            for d in interface_events:events.append(NetWatchEvent(workspace_id=ws.id,kind="interface",severity="medium" if not d.get("isup") else "info",summary="Interface snapshot" if d.get("periodic") else "Interface state changed",explanation=_explain("interface",d,{}),data={**d,"sensor":snap["sensor"]},baseline={}))
             metrics={"connection_count":len(connections),"process_count":len(processes)}
             for metric,value in metrics.items():
                 b=await _baseline(db,ws.id,metric,value);mean=float((b.value or {}).get("mean",value))
