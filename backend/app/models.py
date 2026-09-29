@@ -350,3 +350,41 @@ class NetWatchBaseline(Base):
     sample_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     __table_args__ = (UniqueConstraint("workspace_id", "metric", name="uq_net_watch_baseline_metric"),)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    scan_id: Mapped[str] = mapped_column(ForeignKey("scans.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    template: Mapped[str] = mapped_column(String(32), default="technical", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    branding: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    finding_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    include_evidence: Mapped[bool] = mapped_column(Boolean, default=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class ReportVersion(Base):
+    __tablename__ = "report_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    __table_args__ = (UniqueConstraint("report_id", "version", name="uq_report_version"),)
+
+class ReportDownload(Base):
+    __tablename__ = "report_downloads"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    format: Mapped[str] = mapped_column(String(12), index=True)
+    downloaded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
