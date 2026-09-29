@@ -427,7 +427,6 @@ MODULES = {
     "cors_audit": cors_audit,
     "technology_detection": tech_detection,
     "endpoint_inventory": endpoint_inventory,
-    "net_watch": port_scanner,
 }
 
 PROFILES = {
