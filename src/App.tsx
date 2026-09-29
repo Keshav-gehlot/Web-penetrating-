@@ -26,6 +26,7 @@ import NetWatch from './pages/NetWatch';
 import SystemStatus from './pages/SystemStatus';
 import Schedules from './pages/Schedules';
 import ScopeManager from './pages/ScopeManager';
+import DesignSystem from './pages/DesignSystem';
 
 function Protected() {
   const location = useLocation();
@@ -73,6 +74,7 @@ function Protected() {
             <Route path="/schedules" element={<Schedules />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/design-system" element={<DesignSystem />} />
             <Route path="/topology" element={<Topology />} />
             <Route path="/investigation" element={<Investigation />} />
             <Route path="/osint" element={<OSINT />} />
