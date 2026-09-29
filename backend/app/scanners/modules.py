@@ -292,7 +292,7 @@ MODULES={
  "dns_recon":dns_recon,"cve_lookup":cve_lookup,"csrf_detector":csrf_detector,"ssrf_detector":ssrf_detector,
  "xxe_detector":xxe_detector,"authentication_tester":auth_tester,"open_redirect":open_redirect_detector,
  "security_txt":security_txt,"robots_sitemap":robots_sitemap,"cookie_audit":cookie_audit,"cors_audit":cors_audit,
- "technology_detection":tech_detection,"endpoint_inventory":endpoint_inventory,"net_watch":port_scanner,
+ "technology_detection":tech_detection,"endpoint_inventory":endpoint_inventory,
  "http_snapshot":http_snapshot_module,"tls_analyzer":tls_analyzer,
 }
 

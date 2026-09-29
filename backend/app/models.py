@@ -68,3 +68,29 @@ class Finding(Base):
     assignee:Mapped[str|None]=mapped_column(String(255),nullable=True); description:Mapped[str]=mapped_column(Text,default=""); remediation:Mapped[str]=mapped_column(Text,default=""); evidence:Mapped[dict[str,Any]]=mapped_column(JSON,default=dict); confidence:Mapped[float]=mapped_column(default=1.0)
     first_seen:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); last_seen:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
     scan:Mapped[Scan]=relationship(back_populates="findings")
+
+
+class NetWatchEvent(Base):
+    __tablename__="net_watch_events"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    workspace_id:Mapped[str]=mapped_column(ForeignKey("workspaces.id",ondelete="CASCADE"),index=True)
+    kind:Mapped[str]=mapped_column(String(32),index=True)
+    severity:Mapped[str]=mapped_column(String(20),default="info",index=True)
+    summary:Mapped[str]=mapped_column(Text)
+    explanation:Mapped[str]=mapped_column(Text,default="")
+    data:Mapped[dict[str,Any]]=mapped_column(JSON,default=dict)
+    baseline:Mapped[dict[str,Any]]=mapped_column(JSON,default=dict)
+    finding_id:Mapped[str|None]=mapped_column(ForeignKey("findings.id",ondelete="SET NULL"),nullable=True,index=True)
+    acknowledged_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
+    acknowledged_by:Mapped[str|None]=mapped_column(String(255),nullable=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now(),index=True)
+
+class NetWatchBaseline(Base):
+    __tablename__="net_watch_baselines"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    workspace_id:Mapped[str]=mapped_column(ForeignKey("workspaces.id",ondelete="CASCADE"),index=True)
+    metric:Mapped[str]=mapped_column(String(80),index=True)
+    value:Mapped[dict[str,Any]]=mapped_column(JSON,default=dict)
+    sample_count:Mapped[int]=mapped_column(Integer,default=0)
+    updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now(),onupdate=func.now())
+    __table_args__=(UniqueConstraint("workspace_id","metric",name="uq_net_watch_baseline_metric"),)

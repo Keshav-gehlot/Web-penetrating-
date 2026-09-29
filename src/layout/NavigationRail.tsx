@@ -5,7 +5,7 @@ import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { clearSession, getSession } from '../lib/auth';
 
-const NAV_ITEMS=[{icon:Activity,label:'Overview',path:'/dashboard'},{icon:Server,label:'Assets',path:'/assets'},{icon:Network,label:'Topology',path:'/topology'},{icon:Crosshair,label:'Scans',path:'/scans'},{icon:ShieldAlert,label:'Vulnerabilities',path:'/vulnerabilities'},{icon:FlaskConical,label:'Investigation',path:'/investigation'},{icon:Radar,label:'OSINT',path:'/osint'},{icon:FileText,label:'Reports',path:'/reports'}];
+const NAV_ITEMS=[{icon:Activity,label:'Overview',path:'/dashboard'},{icon:Server,label:'Assets',path:'/assets'},{icon:Network,label:'Topology',path:'/topology'},{icon:Activity,label:'Net-Watch',path:'/net-watch'},{icon:Crosshair,label:'Scans',path:'/scans'},{icon:ShieldAlert,label:'Vulnerabilities',path:'/vulnerabilities'},{icon:FlaskConical,label:'Investigation',path:'/investigation'},{icon:Radar,label:'OSINT',path:'/osint'},{icon:FileText,label:'Reports',path:'/reports'}];
 const BOTTOM_NAV_ITEMS=[{icon:TerminalSquare,label:'Terminal',path:'/terminal'},{icon:Users,label:'Team',path:'/team'},{icon:Settings,label:'Settings',path:'/settings'}];
 
 export function NavigationRail(){
