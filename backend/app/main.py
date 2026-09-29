@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import ipaddress,socket
 from urllib.parse import urlparse
 from fastapi import FastAPI,HTTPException,Depends
@@ -9,7 +10,17 @@ from .database import init_db
 from .auth import Principal
 from .rbac import require_permission
 @asynccontextmanager
-async def lifespan(app:FastAPI):await init_db();yield
+async def lifespan(app:FastAPI):
+ await init_db();task=None
+ if settings.NET_WATCH_ENABLED:
+  from .net_watch import collector_loop
+  task=asyncio.create_task(collector_loop(),name="net-watch-collector")
+ try:yield
+ finally:
+  if task:
+   task.cancel()
+   try:await task
+   except asyncio.CancelledError:pass
 app=FastAPI(title="PHANTOM Security API",version="2.0.0",lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type"])
 class TargetRequest(BaseModel):target:str=Field(min_length=1,max_length=2048)
