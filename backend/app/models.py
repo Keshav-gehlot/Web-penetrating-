@@ -388,3 +388,34 @@ class ReportDownload(Base):
     format: Mapped[str] = mapped_column(String(12), index=True)
     downloaded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Integration(Base):
+    __tablename__ = "integrations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(24), default="unverified", index=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (UniqueConstraint("workspace_id", "provider", name="uq_integration_workspace_provider"),)
+
+class IntegrationDelivery(Base):
+    __tablename__ = "integration_deliveries"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    integration_id: Mapped[str] = mapped_column(ForeignKey("integrations.id", ondelete="CASCADE"), index=True)
+    finding_id: Mapped[str | None] = mapped_column(ForeignKey("findings.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
