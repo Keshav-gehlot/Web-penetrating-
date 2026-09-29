@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, io
+import csv, io, json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -25,6 +25,11 @@ async def timeline(kind:str|None=None,limit:int=100,principal:Principal=Depends(
     if kind:q=q.where(NetWatchEvent.kind==kind)
     rows=(await db.scalars(q.order_by(NetWatchEvent.created_at.desc()).limit(min(max(limit,1),1000)))).all()
     return [serialize(x) for x in rows]
+
+@router.get("/status")
+async def status(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
+    latest=await db.scalar(select(NetWatchEvent).where(NetWatchEvent.workspace_id==principal.workspace_id).order_by(NetWatchEvent.created_at.desc()).limit(1))
+    return {"enabled":True,"last_event_at":latest.created_at.isoformat() if latest and latest.created_at else None,"sensor":(latest.data or {}).get("sensor") if latest else None}
 
 @router.get("/baselines")
 async def baselines(principal:Principal=Depends(require_permission("scan:view")),db:AsyncSession=Depends(get_db)):
@@ -64,3 +69,10 @@ async def export_csv(principal:Principal=Depends(require_permission("report:expo
     out=io.StringIO();w=csv.writer(out);w.writerow(["id","created_at","kind","severity","summary","explanation","finding_id","acknowledged_at","acknowledged_by"])
     for e in rows:w.writerow([e.id,e.created_at.isoformat() if e.created_at else "",e.kind,e.severity,e.summary,e.explanation,e.finding_id or "",e.acknowledged_at.isoformat() if e.acknowledged_at else "",e.acknowledged_by or ""])
     return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=net-watch.csv"})
+
+
+@router.get("/export.json")
+async def export_json(principal:Principal=Depends(require_permission("report:export")),db:AsyncSession=Depends(get_db)):
+    rows=(await db.scalars(select(NetWatchEvent).where(NetWatchEvent.workspace_id==principal.workspace_id).order_by(NetWatchEvent.created_at.desc()).limit(10000))).all()
+    payload=json.dumps([serialize(x) for x in rows],default=str)
+    return StreamingResponse(iter([payload]),media_type="application/json",headers={"Content-Disposition":"attachment; filename=net-watch.json"})
