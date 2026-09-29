@@ -75,6 +75,11 @@ class Settings:
     NET_WATCH_ENABLED = os.getenv("PHANTOM_NET_WATCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     NET_WATCH_INTERVAL_SECONDS = max(10, int(os.getenv("PHANTOM_NET_WATCH_INTERVAL_SECONDS", "30")))
     NET_WATCH_RETENTION_DAYS = max(1, int(os.getenv("PHANTOM_NET_WATCH_RETENTION_DAYS", "30")))
+    AUDIT_RETENTION_DAYS = max(7, int(os.getenv("PHANTOM_AUDIT_RETENTION_DAYS", "365")))
+    OPERATIONAL_RETENTION_DAYS = max(1, int(os.getenv("PHANTOM_OPERATIONAL_RETENTION_DAYS", "30")))
+    API_RATE_LIMIT_PER_MINUTE = max(10, int(os.getenv("PHANTOM_API_RATE_LIMIT_PER_MINUTE", "300")))
+    DB_POOL_SIZE = max(1, int(os.getenv("PHANTOM_DB_POOL_SIZE", "10")))
+    DB_MAX_OVERFLOW = max(0, int(os.getenv("PHANTOM_DB_MAX_OVERFLOW", "20")))
 
 
 settings = Settings()
