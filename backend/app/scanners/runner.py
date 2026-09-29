@@ -9,6 +9,9 @@ from ..config import settings
 
 MODULES.setdefault("web_trust_audit", web_trust_audit)
 PROFILES.setdefault("trust", ["web_trust_audit"])
+# Deep includes every bounded scanner plus the trust/accessibility audit. Keep this
+# explicit after registration so the profile cannot silently omit late modules.
+PROFILES["deep"] = tuple(dict.fromkeys((*MODULES.keys(), "web_trust_audit")))
 scanner_modules.get = bounded_get
 scanner_modules.http_snapshot = bounded_snapshot
 
@@ -44,4 +47,9 @@ async def run_profile(profile: str, target: str) -> list[dict]:
         raise ValueError(f"Profile exceeds the maximum of {settings.SCAN_MAX_MODULES} modules")
     runtime_id = f"profile:{profile}:{target}"
     ensure_runtime(runtime_id)
-    return list(await asyncio.gather(*(run_module(name, target, runtime_id=runtime_id) for name in names)))
+    # Run profiles sequentially so the shared per-scan runtime budget is enforced
+    # predictably and targets are not hit by every module at once.
+    results = []
+    for name in names:
+        results.append(await run_module(name, target, runtime_id=runtime_id))
+    return results
