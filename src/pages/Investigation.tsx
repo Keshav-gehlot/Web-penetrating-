@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Target, MessageSquare, Pin, TerminalSquare, Play, Spline, FileJson, Clock3, Save, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { authHeaders } from '../lib/auth';
 
 const API = (import.meta.env.VITE_PHANTOM_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -22,7 +23,7 @@ export default function Investigation() {
   useEffect(() => {
     if (!findingId) return;
     setError('');
-    fetch(`${API}/api/v1/investigations/${encodeURIComponent(findingId)}`)
+    fetch(`${API}/api/v1/investigations/${encodeURIComponent(findingId)}`, { headers: authHeaders() })
       .then(async (r) => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
       .then((value: InvestigationData) => { setData(value); setNote(value.finding.evidence?.analyst_note ?? ''); })
       .catch((e) => setError(e.message || 'Unable to load investigation'));
@@ -32,7 +33,7 @@ export default function Investigation() {
     if (!findingId) return;
     setSaving(true); setError('');
     try {
-      const r = await fetch(`${API}/api/v1/investigations/${encodeURIComponent(findingId)}/notes`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
+      const r = await fetch(`${API}/api/v1/investigations/${encodeURIComponent(findingId)}/notes`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ note }) });
       if (!r.ok) throw new Error(await r.text());
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to save note'); }
     finally { setSaving(false); }
