@@ -72,6 +72,9 @@ class Settings:
     WS_TICKET_TTL_SECONDS = max(
         30, int(os.getenv("PHANTOM_WS_TICKET_TTL_SECONDS", "60"))
     )
+    NET_WATCH_ENABLED = os.getenv("PHANTOM_NET_WATCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    NET_WATCH_INTERVAL_SECONDS = max(10, int(os.getenv("PHANTOM_NET_WATCH_INTERVAL_SECONDS", "30")))
+    NET_WATCH_RETENTION_DAYS = max(1, int(os.getenv("PHANTOM_NET_WATCH_RETENTION_DAYS", "30")))
 
 
 settings = Settings()

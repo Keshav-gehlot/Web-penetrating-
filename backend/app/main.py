@@ -1,6 +1,7 @@
 from __future__ import annotations
 # Railway deployment trigger: bootstrap reconciliation must run on every API startup.
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import Depends,FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel,Field
@@ -12,7 +13,16 @@ from .rbac import require_permission
 from .security_scope import resolve_public_host,validate_target
 @asynccontextmanager
 async def lifespan(app:FastAPI):
- await init_db();yield
+ await init_db();task=None
+ if settings.NET_WATCH_ENABLED:
+  from .net_watch import collector_loop
+  task=asyncio.create_task(collector_loop(),name="net-watch-history")
+ try:yield
+ finally:
+  if task:
+   task.cancel()
+   try:await task
+   except asyncio.CancelledError:pass
 app=FastAPI(title=settings.APP_NAME,version="2.0.0",description="PHANTOM Security Operations API for authorized, bounded security assessments.",docs_url="/docs" if settings.ENVIRONMENT!="production" else None,redoc_url="/redoc" if settings.ENVIRONMENT!="production" else None,lifespan=lifespan)
 app.add_middleware(RequestContextMiddleware);app.add_middleware(CORSMiddleware,allow_origins=settings.CORS_ORIGINS,allow_credentials=True,allow_methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Request-ID"])
 class TargetRequest(BaseModel): target:str=Field(min_length=1,max_length=2048)
@@ -32,6 +42,7 @@ from .api.health import router as health_router
 from .api.investigations import router as investigations_router
 from .api.network import router as network_router
 from .api.network_anomalies import router as network_anomalies_router
+from .api.net_watch import router as net_watch_router
 from .api.operations import router as operations_router
 from .api.reports import router as reports_router
 from .api.scans import router as scans_router
@@ -41,4 +52,4 @@ from .api.system import router as system_router
 from .api.intelligence import router as intelligence_router
 from .api.workspaces import router as workspaces_router
 from .api.topology import router as topology_router
-for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,schedules_router,scope_router,health_router,system_router,operations_router,topology_router): app.include_router(router)
+for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,net_watch_router,schedules_router,scope_router,health_router,system_router,operations_router,topology_router): app.include_router(router)
