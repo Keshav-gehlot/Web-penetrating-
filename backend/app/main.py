@@ -56,4 +56,5 @@ from .api.workspaces import router as workspaces_router
 from .api.dashboard import router as dashboard_router
 from .api.health import router as health_router
 from .api.system import router as system_router
-for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,health_router,system_router):app.include_router(router)
+from .api.net_watch import router as net_watch_router
+for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,health_router,system_router,net_watch_router):app.include_router(router)
