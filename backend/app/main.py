@@ -40,6 +40,7 @@ from .api.events import router as events_router
 from .api.findings import router as findings_router
 from .api.health import router as health_router
 from .api.investigations import router as investigations_router
+from .api.integrations import router as integrations_router
 from .api.network import router as network_router
 from .api.network_anomalies import router as network_anomalies_router
 from .api.net_watch import router as net_watch_router
@@ -52,4 +53,4 @@ from .api.system import router as system_router
 from .api.intelligence import router as intelligence_router
 from .api.workspaces import router as workspaces_router
 from .api.topology import router as topology_router
-for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,net_watch_router,schedules_router,scope_router,health_router,system_router,operations_router,topology_router): app.include_router(router)
+for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,network_router,network_anomalies_router,net_watch_router,schedules_router,scope_router,health_router,system_router,operations_router,topology_router,integrations_router): app.include_router(router)
