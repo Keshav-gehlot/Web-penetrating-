@@ -23,6 +23,11 @@ class Settings:
     JOB_LEASE_SECONDS=max(30,int(os.getenv("PHANTOM_JOB_LEASE_SECONDS","900")))
     MAX_JOB_ATTEMPTS=max(1,int(os.getenv("PHANTOM_MAX_JOB_ATTEMPTS","3")))
     WS_TICKET_TTL_SECONDS=max(30,int(os.getenv("PHANTOM_WS_TICKET_TTL_SECONDS","60")))
+    NET_WATCH_ENABLED=os.getenv("PHANTOM_NET_WATCH_ENABLED","true").lower() in {"1","true","yes","on"}
+    NET_WATCH_INTERVAL_SECONDS=max(10,int(os.getenv("PHANTOM_NET_WATCH_INTERVAL_SECONDS","30")))
+    NET_WATCH_RETENTION_DAYS=max(1,int(os.getenv("PHANTOM_NET_WATCH_RETENTION_DAYS","30")))
+    NET_WATCH_BASELINE_MIN_SAMPLES=max(3,int(os.getenv("PHANTOM_NET_WATCH_BASELINE_MIN_SAMPLES","10")))
+    NET_WATCH_ANOMALY_MULTIPLIER=max(1.5,float(os.getenv("PHANTOM_NET_WATCH_ANOMALY_MULTIPLIER","2.5")))
 
 settings=Settings()
 if settings.ENVIRONMENT in {"production","prod"} and settings.AUTH_SECRET == "change-this-development-secret":
