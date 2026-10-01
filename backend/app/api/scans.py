@@ -47,7 +47,7 @@ async def execute_scan(scan_id, expected_worker=None):
      if existing:existing.last_seen=datetime.now(timezone.utc);continue
      finding=Finding(scan_id=scan.id,module=item.get("module",module_name),title=item.get("title","Untitled finding"),severity=item.get("severity","info"),status="open",fingerprint=fp,cve=item.get("cve"),cwe=item.get("cwe"),cvss=item.get("cvss"),description=item.get("description",""),remediation=item.get("remediation",""),evidence=item.get("evidence",{}),confidence=float(item.get("confidence",1.0)))
      db.add(finding);await db.flush();await bus.publish(scan_id,{"event":"finding.created","scan_id":scan_id,"finding":serialize_finding(finding)})
-    await db.commit();await bus.publish(scan_id,{"event":"module.completed","scan_id":scan_id,"module":module_name,"index":index,"total":total})
+    await db.commit();await bus.publish(scan_id,{"event":"module.completed","scan_id":scan_id,"module":module_name,"index":index,"total":total,"finding_count":len(result.get("findings",[])),"status":result.get("status","ok"),"error":result.get("error")})
    scan.status="completed";scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.completed","scan_id":scan_id});return True
   except Exception as exc:
    scan.status="failed";scan.error=str(exc);scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return False
