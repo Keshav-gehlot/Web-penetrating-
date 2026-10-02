@@ -12,6 +12,7 @@ from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
+from ..scanners.coverage import coverage_catalog
 from .audit import record_audit
 from .findings import fingerprint_for
 router=APIRouter(prefix="/api/v1/scans",tags=["scans"])
@@ -52,7 +53,7 @@ async def execute_scan(scan_id, expected_worker=None):
   except Exception as exc:
    scan.status="failed";scan.error=str(exc);scan.completed_at=datetime.now(timezone.utc);scan.worker_id=None;scan.lease_expires_at=None;await db.commit();await bus.publish(scan_id,{"event":"scan.failed","scan_id":scan_id,"error":str(exc)});return False
 @router.get("/modules")
-async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()}}
+async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()},"coverage":{"count":len(coverage_catalog()),"items":coverage_catalog(),"mode":"bounded_non_destructive"}}
 @router.post("")
 async def create_scan(request:ScanRequest,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  target=validate_target(request.target);asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
