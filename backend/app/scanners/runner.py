@@ -6,6 +6,7 @@ from .modules import MODULES, PROFILES
 from .runtime import bounded_get, bounded_snapshot, ensure_runtime
 from .trust_audit import web_trust_audit
 from .coverage import web_vulnerability_coverage
+from .vulnerability_modules import run_vulnerability_module, vulnerability_module_registry
 from ..config import settings
 
 MODULES.setdefault("web_trust_audit", web_trust_audit)
@@ -19,6 +20,8 @@ async def _web_vulnerability_coverage(target: str):
 MODULES.setdefault("web_vulnerability_coverage", _web_vulnerability_coverage)
 PROFILES["standard"] = tuple(dict.fromkeys((*PROFILES.get("standard", ()), "web_vulnerability_coverage")))
 PROFILES["deep"] = tuple(dict.fromkeys((*PROFILES.get("deep", ()), "web_vulnerability_coverage")))
+for _module_name in vulnerability_module_registry():
+    MODULES.setdefault(_module_name, lambda target, _name=_module_name: run_vulnerability_module(_name, target))
 scanner_modules.get = bounded_get
 scanner_modules.http_snapshot = bounded_snapshot
 
