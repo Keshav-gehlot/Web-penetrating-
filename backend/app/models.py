@@ -262,7 +262,8 @@ class Scan(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     asset: Mapped[Asset | None] = relationship(back_populates="scans")
-    credential: Mapped[AssessmentCredential | None] = relationship()
+    credential: Mapped[AssessmentCredential | None] = relationship(foreign_keys=[credential_id])
+    comparison_credential: Mapped[AssessmentCredential | None] = relationship(foreign_keys=[comparison_credential_id])
     findings: Mapped[list[Finding]] = relationship(back_populates="scan", cascade="all, delete-orphan")
 
 
