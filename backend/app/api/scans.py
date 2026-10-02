@@ -7,26 +7,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Principal
 from ..database import SessionLocal, get_db
 from ..main import validate_target
-from ..models import Asset, Finding, Scan
+from ..models import Asset, AssessmentCredential, Finding, Scan
 from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
 from ..scanners.runner import MODULES, PROFILES, run_module
+from ..scanners.runtime import ScanAuth, configure_runtime
+from ..security import decrypt_credential
 from ..scanners.coverage import coverage_catalog
 from ..scanners.vulnerability_modules import vulnerability_module_registry
 from .audit import record_audit
 from .findings import fingerprint_for
 router=APIRouter(prefix="/api/v1/scans",tags=["scans"])
-class ScanRequest(BaseModel):target:str=Field(min_length=1,max_length=2048);profile:str=Field(default="standard",pattern="^(quick|standard|deep|trust)$")
-class ModuleRunRequest(BaseModel):target:str=Field(min_length=1,max_length=2048)
-def serialize_scan(scan):return {"id":scan.id,"target":scan.target,"host":scan.host,"profile":scan.profile,"modules":scan.modules,"status":scan.status,"created_at":scan.created_at.isoformat() if scan.created_at else None,"started_at":scan.started_at.isoformat() if scan.started_at else None,"completed_at":scan.completed_at.isoformat() if scan.completed_at else None,"error":scan.error,"attempt":scan.attempt,"worker_id":scan.worker_id,"lease_expires_at":scan.lease_expires_at.isoformat() if scan.lease_expires_at else None,"cancel_requested_at":scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None,"cancelled_at":scan.cancelled_at.isoformat() if scan.cancelled_at else None}
+class ScanRequest(BaseModel):
+ target:str=Field(min_length=1,max_length=2048)
+ profile:str=Field(default="standard",pattern="^(quick|standard|deep|trust)$")
+ credential_id:str|None=None
+class ModuleRunRequest(BaseModel):
+ target:str=Field(min_length=1,max_length=2048)
+ credential_id:str|None=None
+def serialize_scan(scan):return {"id":scan.id,"target":scan.target,"host":scan.host,"profile":scan.profile,"modules":scan.modules,"status":scan.status,"created_at":scan.created_at.isoformat() if scan.created_at else None,"started_at":scan.started_at.isoformat() if scan.started_at else None,"completed_at":scan.completed_at.isoformat() if scan.completed_at else None,"error":scan.error,"attempt":scan.attempt,"credential_id":scan.credential_id,"worker_id":scan.worker_id,"lease_expires_at":scan.lease_expires_at.isoformat() if scan.lease_expires_at else None,"cancel_requested_at":scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None,"cancelled_at":scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 def severity_rank(v):return {"info":0,"low":1,"medium":2,"high":3,"critical":4}.get(v.lower(),0)
+
+async def _load_scan_auth(db:AsyncSession,workspace_id:str,credential_id:str|None)->ScanAuth|None:
+ if not credential_id:return None
+ credential=await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id==credential_id,AssessmentCredential.workspace_id==workspace_id))
+ if not credential:raise HTTPException(404,"Assessment credential not found in this workspace")
+ try:secret=decrypt_credential(credential.secret_ciphertext)
+ except RuntimeError as exc:raise HTTPException(503,str(exc)) from exc
+ credential.last_used_at=datetime.now(timezone.utc)
+ return ScanAuth(kind=credential.kind,secret=secret,username=credential.username,header_name=credential.header_name)
+
 def serialize_finding(f):return {"id":f.id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"confidence":f.confidence}
 async def execute_scan(scan_id, expected_worker=None):
  async with SessionLocal() as db:
   scan=await db.get(Scan,scan_id)
   if not scan:return False
   if expected_worker and scan.worker_id!=expected_worker:return False
+  auth=await _load_scan_auth(db,scan.workspace_id,scan.credential_id) if scan.workspace_id else None
+  configure_runtime(scan.id,auth)
   scan.status="running";scan.started_at=scan.started_at or datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.started","scan_id":scan_id})
   try:
    total=len(scan.modules)
@@ -58,9 +77,12 @@ async def execute_scan(scan_id, expected_worker=None):
 async def list_modules(principal:Principal=Depends(require_permission("scan:view"))):return {"count":len(MODULES),"modules":[{"id":n,"status":"implemented"} for n in MODULES],"profiles":{k:list(v) for k,v in PROFILES.items()},"vulnerability_modules":vulnerability_module_registry(),"coverage":{"count":len(coverage_catalog()),"items":coverage_catalog(),"mode":"bounded_non_destructive"}}
 @router.post("")
 async def create_scan(request:ScanRequest,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
- target=validate_target(request.target);asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
+ target=validate_target(request.target)
+ if request.credential_id:
+  await _load_scan_auth(db,principal.workspace_id,request.credential_id)
+ asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target["host"]))
  if not asset:asset=Asset(host=target["host"],target=target["target"],workspace_id=principal.workspace_id);db.add(asset);await db.flush()
- scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,attempt=1);db.add(scan);await record_audit(db,request_ctx,"scan.created","scan",scan.id,{"target":scan.target,"profile":scan.profile},principal);await db.commit();await db.refresh(scan)
+ scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,credential_id=request.credential_id,attempt=1);db.add(scan);await record_audit(db,request_ctx,"scan.created","scan",scan.id,{"target":scan.target,"profile":scan.profile},principal);await db.commit();await db.refresh(scan)
  await enqueue_scan(scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
 @router.post("/modules/{module_name}/run")
 async def run_single_module(module_name:str,request:ModuleRunRequest,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
@@ -74,7 +96,9 @@ async def run_single_module(module_name:str,request:ModuleRunRequest,request_ctx
  asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target_info["host"]))
  if not asset:
   raise HTTPException(403,"Target is not onboarded in this workspace")
- await record_audit(db,request_ctx,"scan.module_run","scan_module",None,{"module":module_name,"target":target,"asset_id":asset.id},principal)
+ auth=await _load_scan_auth(db,principal.workspace_id,request.credential_id)
+ configure_runtime(f"api-module:{module_name}:{target}",auth)
+ await record_audit(db,request_ctx,"scan.module_run","scan_module",None,{"module":module_name,"target":target,"asset_id":asset.id,"credential_id":request.credential_id},principal)
  await db.commit()
  return await run_module(module_name,target,runtime_id=f"api-module:{module_name}:{target}")
 
