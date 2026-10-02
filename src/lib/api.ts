@@ -1,5 +1,3 @@
-import { authHeaders } from './auth';
-
 const configuredBase = (import.meta.env.VITE_PHANTOM_API_URL ?? '').trim().replace(/\/$/, '');
 const API_BASE = configuredBase || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
