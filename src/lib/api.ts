@@ -49,12 +49,7 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
     throw new ApiError('PHANTOM API returned invalid JSON.', response.status, 'INVALID_JSON');
   }
 
-  if (
-    payload &&
-    typeof payload === 'object' &&
-    'data' in payload &&
-    'error' in payload
-  ) {
+  if (payload && typeof payload === 'object' && 'data' in payload && 'error' in payload) {
     const envelope = payload as ApiEnvelope<T>;
     if (envelope.error) {
       throw new ApiError(
@@ -67,33 +62,56 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
     return envelope.data;
   }
 
-  // Keep compatibility with endpoints that have not yet been envelope-wrapped.
-  // New /api/v1 endpoints must return the standard envelope.
   return payload as T;
+}
+
+function readAccessToken(): string | undefined {
+  try {
+    const raw = localStorage.getItem('phantom.session');
+    if (!raw) return undefined;
+    const session = JSON.parse(raw) as { access_token?: unknown };
+    return typeof session.access_token === 'string' && session.access_token ? session.access_token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function handleAuthenticationFailure(error: ApiError) {
+  if (error.status !== 401) return;
+  localStorage.removeItem('phantom.session');
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('phantom:auth-expired'));
+  }
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  try {
-    const session = JSON.parse(localStorage.getItem('phantom.session') || 'null') as { access_token?: string } | null;
-    if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
-  } catch { /* malformed session is handled by the auth flow */ }
+  const token = readAccessToken();
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
 
   const response = await fetch(buildUrl(path), { ...init, headers });
-  return parseEnvelope<T>(response);
+  try {
+    return await parseEnvelope<T>(response);
+  } catch (error) {
+    if (error instanceof ApiError) handleAuthenticationFailure(error);
+    throw error;
+  }
 }
 
 export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers);
-  try {
-    const session = JSON.parse(localStorage.getItem('phantom.session') || 'null') as { access_token?: string } | null;
-    if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
-  } catch { /* malformed session is handled by the auth flow */ }
+  const token = readAccessToken();
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
 
   const response = await fetch(buildUrl(path), { ...init, headers });
-  if (!response.ok) return parseError(response);
-  return response.blob();
+  try {
+    if (!response.ok) return parseError(response);
+    return response.blob();
+  } catch (error) {
+    if (error instanceof ApiError) handleAuthenticationFailure(error);
+    throw error;
+  }
 }
 
 export function apiUrl(path: string): string {
