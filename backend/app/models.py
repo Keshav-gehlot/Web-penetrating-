@@ -250,6 +250,7 @@ class Scan(Base):
     modules: Mapped[list[str]] = mapped_column(JSON, default=list)
     workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
     credential_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_credentials.id", ondelete="SET NULL"), nullable=True, index=True)
+    comparison_credential_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_credentials.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
