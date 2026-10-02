@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-from .runtime import bounded_connect, bounded_dns_records, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket
+from .runtime import bounded_connect, bounded_dns_records, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket, current_runtime
 from ..security_scope import scope_host_allowed
 from ..intelligence.cve import enrich_cpe, fingerprint_from_header
 
@@ -347,7 +347,7 @@ async def authenticated_crawl(target):
 
     return base(
         "authenticated_crawl",
-        authenticated=True,
+        authenticated=bool(current_runtime() and current_runtime().auth),
         pages_scanned=len(visited),
         endpoints=sorted(discovered)[:500],
         max_pages=max_pages,
