@@ -30,10 +30,11 @@ class ScanRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048)
     profile: str = Field(default="standard", pattern="^(quick|standard|deep|trust)$")
     credential_id: str | None = None
+    comparison_credential_id: str | None = None
 
 
 def serialize_scan(scan: Scan) -> dict:
-    return {"id": scan.id, "target": scan.target, "host": scan.host, "profile": scan.profile, "modules": scan.modules, "status": scan.status, "credential_id": scan.credential_id, "created_at": scan.created_at.isoformat() if scan.created_at else None, "started_at": scan.started_at.isoformat() if scan.started_at else None, "completed_at": scan.completed_at.isoformat() if scan.completed_at else None, "error": scan.error, "attempt": scan.attempt, "worker_id": scan.worker_id, "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None, "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None, "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None}
+    return {"id": scan.id, "target": scan.target, "host": scan.host, "profile": scan.profile, "modules": scan.modules, "status": scan.status, "credential_id": scan.credential_id, "comparison_credential_id": scan.comparison_credential_id, "created_at": scan.created_at.isoformat() if scan.created_at else None, "started_at": scan.started_at.isoformat() if scan.started_at else None, "completed_at": scan.completed_at.isoformat() if scan.completed_at else None, "error": scan.error, "attempt": scan.attempt, "worker_id": scan.worker_id, "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None, "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None, "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 
 
 def serialize_finding(finding: Finding) -> dict:
@@ -292,11 +293,25 @@ async def create_scan(payload: ScanRequest, request: Request, principal: Princip
         db.add(asset)
         await db.flush()
     credential = None
+    comparison_credential = None
     if payload.credential_id:
         credential = await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id == payload.credential_id, AssessmentCredential.workspace_id == principal.workspace_id))
         if not credential:
             raise HTTPException(400, "Assessment credential not found in workspace")
-    scan = Scan(id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile, modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id, workspace_id=principal.workspace_id, credential_id=credential.id if credential else None, attempt=1)
+    if payload.comparison_credential_id:
+        if not payload.credential_id:
+            raise HTTPException(400, "A primary credential is required for authorization comparison")
+        if payload.comparison_credential_id == payload.credential_id:
+            raise HTTPException(400, "Comparison credential must differ from the primary credential")
+        comparison_credential = await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id == payload.comparison_credential_id, AssessmentCredential.workspace_id == principal.workspace_id))
+        if not comparison_credential:
+            raise HTTPException(400, "Comparison credential not found in workspace")
+    scan = Scan(
+        id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile,
+        modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id,
+        workspace_id=principal.workspace_id, credential_id=credential.id if credential else None,
+        comparison_credential_id=comparison_credential.id if comparison_credential else None, attempt=1
+    )
     db.add(scan)
     await record_audit(db, request, "scan.created", "scan", scan.id, {"target": scan.target, "profile": scan.profile, "scope_id": scope.get("id")}, principal)
     await db.commit()
