@@ -1,12 +1,15 @@
 from __future__ import annotations
 import base64, hashlib, hmac, secrets
+from cryptography.fernet import Fernet, InvalidToken
+from .config import settings
+
 ITERATIONS = 310_000
 PREFIX = "pbkdf2_sha256"
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, ITERATIONS)
-    return f"{PREFIX}${ITERATIONS}${base64.urlsafe_b64encode(salt).decode().rstrip('=')}${digest.hex()}"
+    return f"${ITERATIONS}${base64.urlsafe_b64encode(salt).decode().rstrip('=')}${digest.hex()}"
 
 def verify_password(password: str, stored: str) -> bool:
     try:
@@ -23,3 +26,21 @@ def is_legacy_sha256(stored: str) -> bool:
 
 def verify_legacy_sha256(password: str, stored: str) -> bool:
     return hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored)
+
+def _credential_fernet() -> Fernet:
+    key = settings.CREDENTIAL_ENCRYPTION_KEY
+    if not key:
+        raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY is not configured")
+    try:
+        return Fernet(key.encode("ascii"))
+    except Exception as exc:
+        raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key") from exc
+
+def encrypt_credential(secret: str) -> str:
+    return _credential_fernet().encrypt(secret.encode("utf-8")).decode("ascii")
+
+def decrypt_credential(ciphertext: str) -> str:
+    try:
+        return _credential_fernet().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+    except InvalidToken as exc:
+        raise RuntimeError("Stored assessment credential could not be decrypted") from exc
