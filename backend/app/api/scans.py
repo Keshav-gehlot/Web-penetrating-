@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
+from ..config import settings
 from ..database import SessionLocal, get_db
 from ..models import AssessmentCredential, Asset, CVEIntelligence, Finding, Scan, WorkspaceScope
 from ..observability import record_operational_event
