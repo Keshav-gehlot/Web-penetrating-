@@ -63,9 +63,19 @@ async def create_scan(request:ScanRequest,request_ctx:Request,principal:Principa
  scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,attempt=1);db.add(scan);await record_audit(db,request_ctx,"scan.created","scan",scan.id,{"target":scan.target,"profile":scan.profile},principal);await db.commit();await db.refresh(scan)
  await enqueue_scan(scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
 @router.post("/modules/{module_name}/run")
-async def run_single_module(module_name:str,request:ModuleRunRequest,principal:Principal=Depends(require_permission("scan:create"))):
- target=validate_target(request.target)["target"]
- if module_name not in MODULES:raise HTTPException(404,"Scanner module not found")
+async def run_single_module(module_name:str,request:ModuleRunRequest,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
+ target_info=validate_target(request.target)
+ target=target_info["target"]
+ if module_name not in MODULES:
+  raise HTTPException(404,"Scanner module not found")
+ # A module execution is still a real assessment action. It must be tied to
+ # an asset already onboarded into the caller's workspace; public reachability
+ # alone is never treated as authorization.
+ asset=await db.scalar(select(Asset).where(Asset.workspace_id==principal.workspace_id,Asset.host==target_info["host"]))
+ if not asset:
+  raise HTTPException(403,"Target is not onboarded in this workspace")
+ await record_audit(db,request_ctx,"scan.module_run","scan_module",None,{"module":module_name,"target":target,"asset_id":asset.id},principal)
+ await db.commit()
  return await run_module(module_name,target,runtime_id=f"api-module:{module_name}:{target}")
 
 @router.post("/{scan_id}/run")
