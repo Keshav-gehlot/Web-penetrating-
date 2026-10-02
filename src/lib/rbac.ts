@@ -77,6 +77,7 @@ export function canAccessPath(path: string): boolean {
   const permissionByPath: Array<[string, Permission]> = [
     ['/scope', 'workspace:manage'],
     ['/scans', 'scan:view'],
+    ['/credentials', 'scan:credentials'],
     ['/schedules', 'scan:create'],
     ['/assets', 'scan:view'],
     ['/topology', 'scan:view'],
