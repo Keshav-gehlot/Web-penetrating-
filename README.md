@@ -188,6 +188,26 @@ Open the console at:
 http://127.0.0.1:5173
 ```
 
+## Production deployment
+
+The backend now includes a reproducible container at `backend/Dockerfile`.
+
+For a platform such as Railway, run **two backend services from the same repository/image**:
+
+1. **API service**
+   - Dockerfile: `backend/Dockerfile`
+   - Start command: the image default (`backend/start-api.sh`)
+   - Health/readiness endpoint: `/ready`
+   - Required variables: `DATABASE_URL`, `REDIS_URL` or `PHANTOM_REDIS_URL`, `PHANTOM_AUTH_SECRET`, `PHANTOM_BOOTSTRAP_EMAIL`, `PHANTOM_BOOTSTRAP_PASSWORD`, and the production CORS origin.
+2. **Worker service**
+   - Same Dockerfile/image
+   - Start command: `python -m app.worker`
+   - The worker must receive the same database and Redis connection variables as the API.
+
+The API startup script runs `alembic upgrade head` before starting Uvicorn. Readiness is fail-closed: it returns HTTP 200 only when PostgreSQL and Redis are reachable and the Redis consumer group can be initialized; otherwise it returns HTTP 503. This makes platform health checks reflect the real dependency state.
+
+For production, do not use the development bootstrap password or development auth secret. Restrict CORS to the deployed console origin and keep the database and Redis services private to the application network.
+
 ## Database migrations
 
 Alembic is the source of truth for database schema changes.
