@@ -1,12 +1,12 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Activity, Server, Crosshair, ShieldAlert, FileText, Settings, Users, Search, TerminalSquare, Network, FlaskConical, Radar, LogOut } from 'lucide-react';
+import { Activity, Server, Crosshair, ShieldAlert, FileText, Settings, Users, KeyRound, Search, TerminalSquare, Network, FlaskConical, Radar, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { clearSession, getSession } from '../lib/auth';
 
 const NAV_ITEMS=[{icon:Activity,label:'Overview',path:'/dashboard'},{icon:Server,label:'Assets',path:'/assets'},{icon:Network,label:'Topology',path:'/topology'},{icon:Activity,label:'Net-Watch',path:'/net-watch'},{icon:Crosshair,label:'Scans',path:'/scans'},{icon:ShieldAlert,label:'Vulnerabilities',path:'/vulnerabilities'},{icon:FlaskConical,label:'Investigation',path:'/investigation'},{icon:Radar,label:'OSINT',path:'/osint'},{icon:FileText,label:'Reports',path:'/reports'}];
-const BOTTOM_NAV_ITEMS=[{icon:TerminalSquare,label:'Terminal',path:'/terminal'},{icon:Users,label:'Team',path:'/team'},{icon:Settings,label:'Settings',path:'/settings'}];
+const BOTTOM_NAV_ITEMS=[{icon:TerminalSquare,label:'Terminal',path:'/terminal'},{icon:Users,label:'Team',path:'/team'},{icon:KeyRound,label:'Credentials',path:'/credentials'},{icon:Settings,label:'Settings',path:'/settings'}];
 
 export function NavigationRail(){
   const nav=useNavigate();
