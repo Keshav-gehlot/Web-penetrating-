@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import base64
 import contextvars
 import ipaddress
 import socket
 from dataclasses import dataclass
-import base64
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -20,6 +20,7 @@ class ScanAuth:
     secret: str | None = None
     header_name: str | None = None
 
+
 @dataclass
 class ScanRuntime:
     scope_id: str
@@ -33,6 +34,7 @@ _CURRENT: contextvars.ContextVar[ScanRuntime | None] = contextvars.ContextVar("p
 
 def current_runtime() -> ScanRuntime | None:
     return _CURRENT.get()
+
 
 def configure_runtime(scope_id: str, scope: dict[str, object] | None = None, auth: ScanAuth | None = None) -> ScanRuntime:
     runtime = ensure_runtime(scope_id, scope)
@@ -136,7 +138,10 @@ def _request_headers() -> dict[str, str]:
             headers["Authorization"] = f"Bearer {auth.secret}"
         elif auth.kind == "api_key" and auth.secret:
             headers[auth.header_name or "Authorization"] = auth.secret
+        elif auth.kind == "cookie" and auth.secret:
+            headers["Cookie"] = auth.secret
     return headers
+
 
 async def bounded_get(target: str, path: str = "") -> httpx.Response:
     _consume_request()
@@ -172,7 +177,7 @@ async def bounded_snapshot(target: str) -> httpx.Response:
             _assert_public_host(current_url)
             response = await client.get(current_url)
             if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
-                raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit")
+                raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit)
             if response.status_code not in {301, 302, 303, 307, 308} or not response.headers.get("location"):
                 _assert_scope_url(str(response.url))
                 _assert_public_host(str(response.url))
@@ -188,7 +193,6 @@ def bounded_connect(host: str, port: int) -> None:
 
 
 def bounded_dns_records(host: str, record_types: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT")) -> list[dict[str, str]]:
-    """Resolve DNS records only after PHANTOM scope and request-budget checks."""
     runtime = _CURRENT.get()
     if runtime is not None and runtime.scope is not None and not scope_host_allowed(host, runtime.scope):
         raise RuntimeError("Outbound DNS lookup is outside the authorized workspace scope")
