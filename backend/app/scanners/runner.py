@@ -4,7 +4,7 @@ import asyncio
 import time
 
 from . import modules as scanner_modules
-from .modules import MODULES, PROFILES
+from .modules import MODULES, PROFILES, authenticated_crawl
 from .runtime import ScanAuth, bounded_get, bounded_options, bounded_snapshot, configure_runtime, ensure_runtime
 from .trust_audit import web_trust_audit
 from ..config import settings
@@ -56,6 +56,65 @@ async def run_module(
     except Exception as exc:
         return {"module": name, "status": "error", "error": str(exc), "findings": [], "metrics": {"duration_ms": round((time.monotonic() - started) * 1000, 1), "requests": runtime.requests - request_before}}
 
+
+
+async def run_authorization_comparison(
+    target: str,
+    primary: ScanAuth,
+    comparison: ScanAuth,
+    runtime_id: str,
+    scope: dict[str, object] | None = None,
+) -> dict:
+    """Compare two explicitly configured identities using read-only same-origin crawling."""
+    started = time.monotonic()
+    configure_runtime(runtime_id, scope=scope, auth=primary)
+    primary_result = await authenticated_crawl(target)
+    primary_routes = {
+        str(item.get("url")): item for item in primary_result.get("observed", [])
+        if item.get("url")
+    }
+    configure_runtime(runtime_id, scope=scope, auth=comparison)
+    comparison_result = await authenticated_crawl(target)
+    comparison_routes = {
+        str(item.get("url")): item for item in comparison_result.get("observed", [])
+        if item.get("url")
+    }
+    findings = []
+    for url in sorted(set(primary_routes) & set(comparison_routes))[:100]:
+        left_status = int(primary_routes[url].get("status", 0))
+        right_status = int(comparison_routes[url].get("status", 0))
+        if (200 <= left_status < 400 and right_status in {401, 403}) or (200 <= right_status < 400 and left_status in {401, 403}):
+            findings.append({
+                "module": "authorization_comparison",
+                "title": "Candidate authorization response differential",
+                "severity": "info",
+                "description": "Two explicitly configured identities received materially different read-only authorization responses for the same route. This is a candidate differential and does not establish an authorization bypass.",
+                "remediation": "Review the route's intended role policy and verify the observed response differential with an authorized application owner.",
+                "evidence": {
+                    "url": url,
+                    "primary_status": left_status,
+                    "comparison_status": right_status,
+                    "primary_identity": "configured-primary",
+                    "comparison_identity": "configured-comparison",
+                    "method": "GET",
+                    "forms_submitted": False,
+                    "javascript_executed": False,
+                },
+                "confidence": 0.7,
+                "provenance": {"module": "authorization_comparison", "method": "read_only_identity_comparison", "version": "1.0"},
+            })
+    return {
+        "module": "authorization_comparison",
+        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "findings": findings[:100],
+        "metrics": {
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "primary_routes": len(primary_routes),
+            "comparison_routes": len(comparison_routes),
+            "differential_count": len(findings),
+        },
+        "note": "Read-only comparison; no privilege escalation or state-changing requests performed.",
+    }
 
 async def run_profile(
     profile: str,
