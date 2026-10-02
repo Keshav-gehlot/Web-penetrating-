@@ -9,7 +9,7 @@ PREFIX = "pbkdf2_sha256"
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, ITERATIONS)
-    return f"${ITERATIONS}${base64.urlsafe_b64encode(salt).decode().rstrip('=')}${digest.hex()}"
+    return f"{PREFIX}${ITERATIONS}${base64.urlsafe_b64encode(salt).decode().rstrip('=')}${digest.hex()}"
 
 def verify_password(password: str, stored: str) -> bool:
     try:
