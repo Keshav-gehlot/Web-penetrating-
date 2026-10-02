@@ -6,6 +6,7 @@ class Settings:
     DATABASE_URL=os.getenv("DATABASE_URL","postgresql+asyncpg://postgres:postgres@localhost:5432/phantom")
     CORS_ORIGINS=[x.strip() for x in os.getenv("PHANTOM_CORS_ORIGINS","http://localhost:5173").split(",") if x.strip()]
     AUTH_SECRET=os.getenv("PHANTOM_AUTH_SECRET","change-this-development-secret")
+    CREDENTIAL_ENCRYPTION_KEY=os.getenv("PHANTOM_CREDENTIAL_ENCRYPTION_KEY","").strip()
     BOOTSTRAP_EMAIL=os.getenv("PHANTOM_BOOTSTRAP_EMAIL","admin@phantom.local")
     BOOTSTRAP_PASSWORD=os.getenv("PHANTOM_BOOTSTRAP_PASSWORD","change-me-before-production")
     BOOTSTRAP_ROLE=os.getenv("PHANTOM_BOOTSTRAP_ROLE","owner")
@@ -34,3 +35,5 @@ if settings.ENVIRONMENT in {"production","prod"} and settings.AUTH_SECRET == "ch
     raise RuntimeError("PHANTOM_AUTH_SECRET must be replaced before production startup")
 if settings.ENVIRONMENT in {"production","prod"} and settings.BOOTSTRAP_PASSWORD == "change-me-before-production":
     raise RuntimeError("PHANTOM_BOOTSTRAP_PASSWORD must be replaced before production startup")
+if settings.ENVIRONMENT in {"production","prod"} and not settings.CREDENTIAL_ENCRYPTION_KEY:
+    raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY must be configured before production startup")
