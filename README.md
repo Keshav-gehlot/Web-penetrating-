@@ -257,6 +257,14 @@ The current platform includes bounded checks for areas such as:
 - RDAP and CVE enrichment;
 - candidate SQL injection, XSS, CSRF, SSRF, XXE, and open-redirect signals.
 
+The platform now exposes a **100-item web vulnerability coverage catalog**. Standard and deep scans run the bounded coverage layer in addition to the existing discovery/assessment modules. The catalog includes the supplied categories from injection, authentication/session, sensitive data, misconfiguration, XML, access control, deserialization, API, transport, client-side, availability, SSRF, business logic, mobile, IoT/WoT, authentication bypass, content spoofing, and zero-day awareness.
+
+The 100 items are implemented as either:
+- **Automated heuristic checks** — passive/low-impact evidence such as headers, cookies, forms, parameter surfaces, technology disclosure, CORS, CSP, URL-fetching inputs, and workflow indicators.
+- **Candidate/manual checks** — items that inherently require authenticated workflows, source/binary inspection, controlled concurrency, credential testing, resource exhaustion, or vendor intelligence.
+
+Exploit execution, brute-force/password cracking, destructive DoS, internal-network SSRF probing, credential attacks, and zero-day exploitation are deliberately not automated by the bounded scanner. Those items are represented in the coverage API with a manual_verification status when they cannot be established safely from the observed HTTP surface.
+
 These checks are intentionally constrained and non-destructive. A finding is an assessment signal that should be validated by an authorized security professional before remediation or escalation.
 
 ## Finding lifecycle
