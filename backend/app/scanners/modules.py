@@ -338,6 +338,7 @@ async def authenticated_crawl(target):
     queue = [target]
     visited: set[str] = set()
     discovered: set[str] = set()
+    observed: list[dict[str, object]] = []
     max_pages = 25
 
     while queue and len(visited) < max_pages:
@@ -351,7 +352,9 @@ async def authenticated_crawl(target):
         except (httpx.HTTPError, RuntimeError):
             continue
 
-        discovered.add(str(response.url).split("#", 1)[0])
+        normalized_response_url = str(response.url).split("#", 1)[0]
+        discovered.add(normalized_response_url)
+        observed.append({"url": normalized_response_url, "status": response.status_code, "content_length": len(response.content)})
         body = response.text[:settings.SCAN_MAX_RESPONSE_BYTES]
         for match in re.finditer(r'(?:href|action)=["\']([^"\']+)', body, re.I):
             candidate = urljoin(str(response.url), match.group(1)).split("#", 1)[0]
@@ -367,6 +370,7 @@ async def authenticated_crawl(target):
         authenticated=bool(current_runtime() and current_runtime().auth),
         pages_scanned=len(visited),
         endpoints=sorted(discovered)[:500],
+        observed=observed[:500],
         max_pages=max_pages,
         same_origin_only=True,
         form_submission=False,
