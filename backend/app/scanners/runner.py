@@ -5,10 +5,20 @@ from . import modules as scanner_modules
 from .modules import MODULES, PROFILES
 from .runtime import bounded_get, bounded_snapshot, ensure_runtime
 from .trust_audit import web_trust_audit
+from .coverage import web_vulnerability_coverage
 from ..config import settings
 
 MODULES.setdefault("web_trust_audit", web_trust_audit)
 PROFILES.setdefault("trust", ["web_trust_audit"])
+
+async def _web_vulnerability_coverage(target: str):
+    response = await scanner_modules.http_snapshot(target)
+    findings, coverage = web_vulnerability_coverage(response, target)
+    return {"module": "web_vulnerability_coverage", "coverage": coverage, "findings": findings}
+
+MODULES.setdefault("web_vulnerability_coverage", _web_vulnerability_coverage)
+PROFILES["standard"] = tuple(dict.fromkeys((*PROFILES.get("standard", ()), "web_vulnerability_coverage")))
+PROFILES["deep"] = tuple(dict.fromkeys((*PROFILES.get("deep", ()), "web_vulnerability_coverage")))
 scanner_modules.get = bounded_get
 scanner_modules.http_snapshot = bounded_snapshot
 
