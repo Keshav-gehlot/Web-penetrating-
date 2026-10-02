@@ -310,6 +310,9 @@ async def endpoint_inventory(target):
     return base("endpoint_inventory", endpoints=sorted(set(endpoints))[:500], forms=parser.forms)
 
 
+async def authenticated_endpoint_inventory(target):
+    return await authenticated_crawl(target)
+
 async def authenticated_crawl(target):
     """Bounded same-origin crawl using the configured assessment authentication.
 
@@ -475,6 +478,7 @@ MODULES = {
     "technology_detection": tech_detection,
     "endpoint_inventory": endpoint_inventory,
     "authenticated_crawl": authenticated_crawl,
+    "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
     "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
 }
 
