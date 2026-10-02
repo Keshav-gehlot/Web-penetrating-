@@ -49,6 +49,11 @@ async def list_credentials(principal:Principal=Depends(require_permission("scan:
     rows=await db.scalars(select(AssessmentCredential).where(AssessmentCredential.workspace_id==principal.workspace_id).order_by(AssessmentCredential.created_at.desc()))
     return [_serialize(c) for c in rows.all()]
 
+@router.get("/available")
+async def available_credentials(principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
+    rows=await db.scalars(select(AssessmentCredential).where(AssessmentCredential.workspace_id==principal.workspace_id).order_by(AssessmentCredential.name.asc()))
+    return [{"id":c.id,"name":c.name,"kind":c.kind,"username":c.username,"header_name":c.header_name} for c in rows.all()]
+
 @router.post("")
 async def create_credential(payload:CredentialCreate,request:Request,principal:Principal=Depends(require_permission("scan:credentials")),db:AsyncSession=Depends(get_db)):
     if not principal.user_id:
