@@ -121,6 +121,7 @@ DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/phantom
 PHANTOM_REDIS_URL=redis://localhost:6379/0
 PHANTOM_CORS_ORIGINS=http://localhost:5173
 PHANTOM_AUTH_SECRET=<long-random-secret>
+PHANTOM_CREDENTIAL_ENCRYPTION_KEY=<Fernet-key>
 PHANTOM_BOOTSTRAP_EMAIL=admin@phantom.local
 PHANTOM_BOOTSTRAP_PASSWORD=<strong-development-password>
 ```
@@ -242,6 +243,26 @@ Security-sensitive operations are protected by explicit permissions such as `sca
 
 Real-time scan updates use dedicated short-lived WebSocket tickets scoped to the requested scan and workspace.
 
+## Authenticated assessments
+
+PHANTOM supports workspace-scoped assessment credentials for authorized applications. Credentials are encrypted at rest with a Fernet key supplied through PHANTOM_CREDENTIAL_ENCRYPTION_KEY; raw secrets are never returned by the credential API or written to audit metadata.
+
+Supported credential types are:
+
+- basic — HTTP Basic authentication using a username and password.
+- bearer — Authorization: Bearer ... authentication.
+- api_key — a configurable Authorization or X-* request header.
+
+Only OWNER, ADMIN, and SECURITY_LEAD can create, rotate, or delete credentials. Other roles may use an existing workspace credential when starting an authorized scan. A scan stores only the credential ID; the encrypted secret is decrypted in memory by the worker when the scan begins.
+
+Example workflow:
+
+1. Create an asset in the authorized workspace.
+2. Create a credential under /api/v1/workspaces/current/credentials.
+3. Start a scan with credential_id set to that credential.
+4. The scanner applies authentication to bounded HTTP requests without exposing the secret in findings or audit logs.
+
+For production, generate a unique Fernet key and store it in the platform secret manager. Rotating this key requires a deliberate credential re-encryption migration; do not simply replace it or existing encrypted credentials will become unreadable.
 ## Scan execution
 
 Scan jobs are delivered through **Redis Streams consumer groups** to native PHANTOM workers. The execution layer provides:
