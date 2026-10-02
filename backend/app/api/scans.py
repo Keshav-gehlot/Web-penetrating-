@@ -44,10 +44,10 @@ async def execute_scan(scan_id, expected_worker=None):
   scan=await db.get(Scan,scan_id)
   if not scan:return False
   if expected_worker and scan.worker_id!=expected_worker:return False
-  auth=await _load_scan_auth(db,scan.workspace_id,scan.credential_id) if scan.workspace_id else None
-  configure_runtime(scan.id,auth)
-  scan.status="running";scan.started_at=scan.started_at or datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.started","scan_id":scan_id})
   try:
+   auth=await _load_scan_auth(db,scan.workspace_id,scan.credential_id) if scan.workspace_id else None
+   configure_runtime(scan.id,auth)
+   scan.status="running";scan.started_at=scan.started_at or datetime.now(timezone.utc);await db.commit();await bus.publish(scan_id,{"event":"scan.started","scan_id":scan_id})
    total=len(scan.modules)
    for index,module_name in enumerate(scan.modules,1):
     state=await db.get(Scan,scan_id)
