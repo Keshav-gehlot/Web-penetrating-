@@ -493,7 +493,6 @@ MODULES = {
     "endpoint_inventory": endpoint_inventory,
     "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
     "authorization_surface": authorization_surface,
-    "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
 }
 
 PROFILES = {
