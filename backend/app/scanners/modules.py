@@ -310,6 +310,20 @@ async def endpoint_inventory(target):
     return base("endpoint_inventory", endpoints=sorted(set(endpoints))[:500], forms=parser.forms)
 
 
+async def authorization_surface(target):
+    """Identify authorization-sensitive routes without attempting privilege escalation."""
+    response, parser = await html_parser(target)
+    host = urlparse(str(response.url)).hostname
+    sensitive_terms = ("admin", "account", "profile", "settings", "user", "billing", "manage", "api")
+    candidates = set()
+    for match in re.finditer(r'(?:href|action|src)=["\']([^"\']+)', response.text, re.I):
+        candidate = urljoin(str(response.url), match.group(1))
+        parsed = urlparse(candidate)
+        if parsed.hostname == host and any(term in (parsed.path or "").lower() for term in sensitive_terms):
+            candidates.add(candidate)
+    runtime = __import__(".runtime", globals(), locals(), ["_CURRENT"], 1)._CURRENT.get()
+    return base("authorization_surface", status=response.status_code, authenticated=bool(runtime and runtime.auth), candidate_count=len(candidates), candidates=sorted(candidates)[:100], note="Candidate routes only; privilege-boundary verification requires an explicitly configured comparison identity.")
+
 async def authenticated_endpoint_inventory(target):
     return await authenticated_crawl(target)
 
@@ -478,6 +492,7 @@ MODULES = {
     "technology_detection": tech_detection,
     "endpoint_inventory": endpoint_inventory,
     "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
+    "authorization_surface": authorization_surface,
     "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
 }
 
