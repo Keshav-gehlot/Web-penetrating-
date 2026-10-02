@@ -8,7 +8,7 @@ export type Permission =
   | 'users:manage'
   | 'scan:create'
   | 'scan:view'
-  | 'scan:cancel'
+  | 'scan:cancel' | 'scan:credentials'
   | 'finding:view'
   | 'finding:edit'
   | 'finding:assign'
