@@ -15,6 +15,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { icon: LockKeyhole, label: 'Scope', path: '/scope', permission: 'workspace:manage' },
   { icon: Network, label: 'Topology', path: '/topology', permission: 'scan:view' },
   { icon: Crosshair, label: 'Scans', path: '/scans', permission: 'scan:view' },
+  { icon: LockKeyhole, label: 'Credentials', path: '/credentials', permission: 'scan:credentials' },
   { icon: CalendarClock, label: 'Schedules', path: '/schedules', permission: 'scan:create' },
   { icon: ShieldAlert, label: 'Vulnerabilities', path: '/vulnerabilities', permission: 'finding:view' },
   { icon: FlaskConical, label: 'Investigation', path: '/investigation', permission: 'finding:view' },
