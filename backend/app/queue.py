@@ -5,7 +5,7 @@ import time
 import uuid
 from redis.asyncio import Redis
 
-REDIS_URL = os.getenv("PHANTOM_REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("PHANTOM_REDIS_URL") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
 SCAN_STREAM = "phantom:scan:jobs"
 SCAN_GROUP = "phantom-workers"
 JOB_LEASE_SECONDS = int(os.getenv("PHANTOM_JOB_LEASE_SECONDS", "900"))
