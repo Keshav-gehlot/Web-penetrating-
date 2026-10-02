@@ -15,3 +15,15 @@ def test_scan_request_budget_is_positive():
     assert settings.SCAN_REQUEST_BUDGET > 0
     assert settings.SCAN_MAX_REDIRECTS >= 0
     assert settings.SCAN_MAX_RESPONSE_BYTES >= 65536
+
+
+def test_runtime_applies_bearer_auth():
+    from app.scanners.runtime import ScanAuth
+    auth = ScanAuth(kind="bearer", secret="token-value")
+    assert auth.headers() == {"Authorization": "Bearer token-value"}
+
+
+def test_runtime_applies_basic_auth():
+    from app.scanners.runtime import ScanAuth
+    auth = ScanAuth(kind="basic", secret="password", username="user")
+    assert auth.headers()["Authorization"].startswith("Basic ")
