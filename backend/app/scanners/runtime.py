@@ -4,6 +4,7 @@ import contextvars
 import ipaddress
 import socket
 from dataclasses import dataclass
+import base64
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -13,10 +14,18 @@ from ..security_scope import default_port_for_url, scope_host_allowed, scope_pat
 
 
 @dataclass
+class ScanAuth:
+    kind: str
+    username: str | None = None
+    secret: str | None = None
+    header_name: str | None = None
+
+@dataclass
 class ScanRuntime:
     scope_id: str
     requests: int = 0
     scope: dict[str, object] | None = None
+    auth: ScanAuth | None = None
 
 
 _CURRENT: contextvars.ContextVar[ScanRuntime | None] = contextvars.ContextVar("phantom_scan_runtime", default=None)
@@ -24,6 +33,11 @@ _CURRENT: contextvars.ContextVar[ScanRuntime | None] = contextvars.ContextVar("p
 
 def current_runtime() -> ScanRuntime | None:
     return _CURRENT.get()
+
+def configure_runtime(scope_id: str, scope: dict[str, object] | None = None, auth: ScanAuth | None = None) -> ScanRuntime:
+    runtime = ensure_runtime(scope_id, scope)
+    runtime.auth = auth
+    return runtime
 
 
 def ensure_runtime(scope_id: str, scope: dict[str, object] | None = None) -> ScanRuntime:
@@ -110,6 +124,20 @@ def scoped_tcp_socket(host: str, port: int) -> socket.socket:
     raise OSError(f"Unable to connect to {host}:{port}")
 
 
+def _request_headers() -> dict[str, str]:
+    headers = {"User-Agent": "PHANTOM/2.0 authorized-security-assessment"}
+    runtime = _CURRENT.get()
+    if runtime and runtime.auth:
+        auth = runtime.auth
+        if auth.kind == "basic" and auth.username is not None and auth.secret is not None:
+            token = base64.b64encode(f"{auth.username}:{auth.secret}".encode()).decode()
+            headers["Authorization"] = f"Basic {token}"
+        elif auth.kind == "bearer" and auth.secret:
+            headers["Authorization"] = f"Bearer {auth.secret}"
+        elif auth.kind == "api_key" and auth.secret:
+            headers[auth.header_name or "Authorization"] = auth.secret
+    return headers
+
 async def bounded_get(target: str, path: str = "") -> httpx.Response:
     _consume_request()
     url = urljoin(target.rstrip("/") + "/", path.lstrip("/"))
@@ -118,7 +146,7 @@ async def bounded_get(target: str, path: str = "") -> httpx.Response:
     async with httpx.AsyncClient(
         follow_redirects=False,
         timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS),
-        headers={"User-Agent": "PHANTOM/2.0 authorized-security-assessment"},
+        headers=_request_headers(),
     ) as client:
         response = await client.get(url)
     if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
