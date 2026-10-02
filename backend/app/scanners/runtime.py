@@ -164,7 +164,7 @@ async def bounded_snapshot(target: str) -> httpx.Response:
     async with httpx.AsyncClient(
         follow_redirects=False,
         timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS),
-        headers={"User-Agent": "PHANTOM/2.0 authorized-security-assessment"},
+        headers=_request_headers(),
     ) as client:
         for _ in range(redirect_limit + 1):
             _consume_request()
