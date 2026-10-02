@@ -224,6 +224,22 @@ class AssetHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+
+class AssessmentCredential(Base):
+    __tablename__ = "assessment_credentials"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(32))
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    header_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    secret_ciphertext: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_assessment_credential_workspace_name"),)
+
+
 class Scan(Base):
     __tablename__ = "scans"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -233,6 +249,7 @@ class Scan(Base):
     status: Mapped[str] = mapped_column(String(32), index=True, default="queued")
     modules: Mapped[list[str]] = mapped_column(JSON, default=list)
     workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id"), nullable=True, index=True)
+    credential_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_credentials.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -244,6 +261,7 @@ class Scan(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     asset: Mapped[Asset | None] = relationship(back_populates="scans")
+    credential: Mapped[AssessmentCredential | None] = relationship()
     findings: Mapped[list[Finding]] = relationship(back_populates="scan", cascade="all, delete-orphan")
 
 
