@@ -56,6 +56,7 @@ async def resolve_host(host:str,principal:Principal=Depends(require_permission("
   public.append(address)
  return {"host":validation["host"],"addresses":public}
 from .api.auth import router as auth_router
+from .api.credentials import router as credentials_router
 from .api.assets import router as assets_router
 from .api.scans import router as scans_router
 from .api.reports import router as reports_router
@@ -68,4 +69,4 @@ from .api.dashboard import router as dashboard_router
 from .api.health import router as health_router
 from .api.system import router as system_router
 from .api.net_watch import router as net_watch_router
-for router in (auth_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,health_router,system_router,net_watch_router):app.include_router(router)
+for router in (auth_router,credentials_router,assets_router,scans_router,reports_router,events_router,findings_router,investigations_router,audit_router,workspaces_router,dashboard_router,health_router,system_router,net_watch_router):app.include_router(router)
