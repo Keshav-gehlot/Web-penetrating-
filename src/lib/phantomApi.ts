@@ -15,7 +15,7 @@ async function request<T>(path:string,init?:RequestInit):Promise<T>{
  if(payload && typeof payload==='object' && 'data' in payload) return (payload as {data:T}).data;
  return payload as T;
 }
-export function createScan(target:string,profile:ScanProfile='standard',credentialId?:string,comparisonCredentialId?:string){return request<Scan>('/api/v1/scans',{method:'POST',body:JSON.stringify({target,profile,...(credentialId?{credential_id:credentialId}:{}),...(comparisonCredentialId?{comparison_credential_id:comparisonCredentialId}:{})})})}
+export function listScans(){return request<Scan[]>('/api/v1/scans')}\nexport function createScan(target:string,profile:ScanProfile='standard',credentialId?:string,comparisonCredentialId?:string){return request<Scan>('/api/v1/scans',{method:'POST',body:JSON.stringify({target,profile,...(credentialId?{credential_id:credentialId}:{}),...(comparisonCredentialId?{comparison_credential_id:comparisonCredentialId}:{})})})}
 export function getScan(scanId:string){return request<Scan&{findings:FindingEvent[]}>(`/api/v1/scans/${encodeURIComponent(scanId)}`)}
 export function cancelScan(scanId:string){return request<Scan>(`/api/v1/scans/${encodeURIComponent(scanId)}/cancel`,{method:'POST'})}
 export async function scanSocket(scanId:string):Promise<WebSocket>{const ticket=await request<{ticket:string}>(`/api/v1/events/ws-ticket?scan_id=${encodeURIComponent(scanId)}`,{method:'POST'});const base=new URL(API_BASE || window.location.origin);base.protocol=base.protocol==='https:'?'wss:':'ws:';base.pathname=`/ws/scans/${encodeURIComponent(scanId)}`;base.search=`?ticket=${encodeURIComponent(ticket.ticket)}`;return new WebSocket(base.toString())}
