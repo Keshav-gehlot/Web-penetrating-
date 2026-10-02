@@ -48,17 +48,31 @@ class Asset(Base):
     scans:Mapped[list[Scan]]=relationship(back_populates="asset")
     __table_args__=(UniqueConstraint("workspace_id","host",name="uq_asset_workspace_host"),)
 
+class AssessmentCredential(Base):
+    __tablename__="assessment_credentials"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=lambda:str(uuid4()))
+    workspace_id:Mapped[str]=mapped_column(ForeignKey("workspaces.id",ondelete="CASCADE"),index=True)
+    name:Mapped[str]=mapped_column(String(120))
+    kind:Mapped[str]=mapped_column(String(24))
+    username:Mapped[str|None]=mapped_column(String(255),nullable=True)
+    header_name:Mapped[str|None]=mapped_column(String(100),nullable=True)
+    secret_ciphertext:Mapped[str]=mapped_column(Text)
+    created_by:Mapped[str]=mapped_column(String(36),index=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now())
+    last_used_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
+    __table_args__=(UniqueConstraint("workspace_id","name",name="uq_assessment_credential_workspace_name"),)
+
 class Scan(Base):
     __tablename__="scans"
     id:Mapped[str]=mapped_column(String(36),primary_key=True); target:Mapped[str]=mapped_column(Text); host:Mapped[str]=mapped_column(String(255),index=True)
     profile:Mapped[str]=mapped_column(String(32)); status:Mapped[str]=mapped_column(String(32),index=True,default="queued"); modules:Mapped[list[str]]=mapped_column(JSON,default=list)
     workspace_id:Mapped[str|None]=mapped_column(ForeignKey("workspaces.id"),nullable=True,index=True)
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=func.now()); started_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); completed_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
-    error:Mapped[str|None]=mapped_column(Text,nullable=True); asset_id:Mapped[str|None]=mapped_column(ForeignKey("assets.id"),nullable=True)
+    error:Mapped[str|None]=mapped_column(Text,nullable=True); credential_id:Mapped[str|None]=mapped_column(ForeignKey("assessment_credentials.id",ondelete="SET NULL"),nullable=True,index=True); asset_id:Mapped[str|None]=mapped_column(ForeignKey("assets.id"),nullable=True)
     worker_id:Mapped[str|None]=mapped_column(String(160),nullable=True,index=True); lease_expires_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True,index=True)
     cancel_requested_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); cancelled_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
     attempt:Mapped[int]=mapped_column(Integer,nullable=False,default=1)
-    asset:Mapped[Asset|None]=relationship(back_populates="scans"); findings:Mapped[list[Finding]]=relationship(back_populates="scan",cascade="all, delete-orphan")
+    asset:Mapped[Asset|None]=relationship(back_populates="scans"); credential:Mapped[AssessmentCredential|None]=relationship(); findings:Mapped[list[Finding]]=relationship(back_populates="scan",cascade="all, delete-orphan")
 
 class Finding(Base):
     __tablename__="findings"
