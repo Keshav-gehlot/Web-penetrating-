@@ -41,7 +41,7 @@ PERMISSIONS: dict[Role, set[str]] = {
         "report:create", "report:export", "audit:view",
     },
     Role.ANALYST: {
-        "scan:create", "scan:view", "scan:credentials",
+        "scan:create", "scan:view",
         "finding:view", "finding:edit", "finding:assign",
         "report:create", "report:export",
     },
