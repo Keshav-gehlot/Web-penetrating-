@@ -310,6 +310,53 @@ async def endpoint_inventory(target):
     return base("endpoint_inventory", endpoints=sorted(set(endpoints))[:500], forms=parser.forms)
 
 
+async def authenticated_crawl(target):
+    """Bounded same-origin crawl using the configured assessment authentication.
+
+    It follows only links/forms that remain on the original hostname. It never
+    submits forms or executes browser JavaScript.
+    """
+    parsed_target = urlparse(target)
+    target_host = parsed_target.hostname
+    queue = [target]
+    visited: set[str] = set()
+    discovered: set[str] = set()
+    max_pages = 25
+
+    while queue and len(visited) < max_pages:
+        current = queue.pop(0)
+        normalized = current.split("#", 1)[0]
+        if normalized in visited:
+            continue
+        visited.add(normalized)
+        try:
+            response = await http_snapshot(normalized)
+        except (httpx.HTTPError, RuntimeError):
+            continue
+
+        discovered.add(str(response.url).split("#", 1)[0])
+        body = response.text[:settings.SCAN_MAX_RESPONSE_BYTES]
+        for match in re.finditer(r'(?:href|action)=["\']([^"\']+)', body, re.I):
+            candidate = urljoin(str(response.url), match.group(1)).split("#", 1)[0]
+            parsed = urlparse(candidate)
+            if parsed.scheme not in {"http", "https"} or parsed.hostname != target_host:
+                continue
+            if candidate not in visited and candidate not in discovered and len(queue) + len(visited) < max_pages:
+                discovered.add(candidate)
+                queue.append(candidate)
+
+    return base(
+        "authenticated_crawl",
+        authenticated=True,
+        pages_scanned=len(visited),
+        endpoints=sorted(discovered)[:500],
+        max_pages=max_pages,
+        same_origin_only=True,
+        form_submission=False,
+        javascript_execution=False,
+    )
+
+
 async def http_header_analyzer(target):
     response = await http_snapshot(target)
     headers = {key.lower(): value for key, value in response.headers.items()}
@@ -427,6 +474,7 @@ MODULES = {
     "cors_audit": cors_audit,
     "technology_detection": tech_detection,
     "endpoint_inventory": endpoint_inventory,
+    "authenticated_crawl": authenticated_crawl,
     "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
 }
 
