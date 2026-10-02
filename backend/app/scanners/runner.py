@@ -5,7 +5,7 @@ import time
 
 from . import modules as scanner_modules
 from .modules import MODULES, PROFILES
-from .runtime import bounded_get, bounded_options, bounded_snapshot, ensure_runtime
+from .runtime import ScanAuth, bounded_get, bounded_options, bounded_snapshot, configure_runtime, ensure_runtime
 from .trust_audit import web_trust_audit
 from ..config import settings
 
@@ -29,11 +29,12 @@ async def run_module(
     target: str,
     runtime_id: str | None = None,
     scope: dict[str, object] | None = None,
+    auth: ScanAuth | None = None,
 ) -> dict:
     if name not in MODULES:
         raise KeyError(f"Unknown scanner module: {name}")
     started = time.monotonic()
-    runtime = ensure_runtime(runtime_id or f"module:{name}:{target}", scope=scope)
+    runtime = configure_runtime(runtime_id or f"module:{name}:{target}", scope=scope, auth=auth)
     request_before = runtime.requests
     try:
         result = await asyncio.wait_for(MODULES[name](target), timeout=settings.SCAN_MODULE_TIMEOUT_SECONDS)
@@ -60,6 +61,7 @@ async def run_profile(
     profile: str,
     target: str,
     scope: dict[str, object] | None = None,
+    auth: ScanAuth | None = None,
 ) -> list[dict]:
     names = PROFILES.get(profile)
     if names is None:
@@ -67,5 +69,5 @@ async def run_profile(
     if len(names) > settings.SCAN_MAX_MODULES:
         raise ValueError(f"Profile exceeds the maximum of {settings.SCAN_MAX_MODULES} modules")
     runtime_id = f"profile:{profile}:{target}"
-    ensure_runtime(runtime_id, scope=scope)
-    return list(await asyncio.gather(*(run_module(name, target, runtime_id=runtime_id, scope=scope) for name in names)))
+    configure_runtime(runtime_id, scope=scope, auth=auth)
+    return list(await asyncio.gather(*(run_module(name, target, runtime_id=runtime_id, scope=scope, auth=auth) for name in names)))
