@@ -257,7 +257,7 @@ The current platform includes bounded checks for areas such as:
 - RDAP and CVE enrichment;
 - candidate SQL injection, XSS, CSRF, SSRF, XXE, and open-redirect signals.
 
-The platform now exposes a **100-item web vulnerability coverage catalog**. Standard and deep scans run the bounded coverage layer in addition to the existing discovery/assessment modules. The catalog includes the supplied categories from injection, authentication/session, sensitive data, misconfiguration, XML, access control, deserialization, API, transport, client-side, availability, SSRF, business logic, mobile, IoT/WoT, authentication bypass, content spoofing, and zero-day awareness.
+The platform now exposes a **100-item web vulnerability coverage catalog** and registers **100 callable vulnerability modules** as `vuln_001` through `vuln_100`. Each can be executed independently through the authorized scanner API, while Standard/Deep scans run the consolidated coverage layer. Standard and deep scans run the bounded coverage layer in addition to the existing discovery/assessment modules. The catalog includes the supplied categories from injection, authentication/session, sensitive data, misconfiguration, XML, access control, deserialization, API, transport, client-side, availability, SSRF, business logic, mobile, IoT/WoT, authentication bypass, content spoofing, and zero-day awareness.
 
 The 100 items are implemented as either:
 - **Automated heuristic checks** — passive/low-impact evidence such as headers, cookies, forms, parameter surfaces, technology disclosure, CORS, CSP, URL-fetching inputs, and workflow indicators.
