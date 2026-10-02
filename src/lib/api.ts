@@ -75,7 +75,10 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  for (const [key, value] of Object.entries(authHeaders())) headers.set(key, value);
+  try {
+    const session = JSON.parse(localStorage.getItem('phantom.session') || 'null') as { access_token?: string } | null;
+    if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  } catch { /* malformed session is handled by the auth flow */ }
 
   const response = await fetch(buildUrl(path), { ...init, headers });
   return parseEnvelope<T>(response);
