@@ -36,6 +36,7 @@ class Settings:
         "PHANTOM_BOOTSTRAP_PASSWORD", "change-me-before-production"
     )
     BOOTSTRAP_ROLE = os.getenv("PHANTOM_BOOTSTRAP_ROLE", "owner")
+    CREDENTIAL_ENCRYPTION_KEY = os.getenv("PHANTOM_CREDENTIAL_ENCRYPTION_KEY", "").strip()
     ENVIRONMENT = os.getenv("PHANTOM_ENV", "development").lower()
     SESSION_HOURS = max(1, int(os.getenv("PHANTOM_SESSION_HOURS", "12")))
     SCAN_MODULE_TIMEOUT_SECONDS = max(
@@ -88,3 +89,5 @@ if settings.ENVIRONMENT in {"production", "prod"} and settings.AUTH_SECRET == "c
     raise RuntimeError("PHANTOM_AUTH_SECRET must be replaced before production startup")
 if settings.ENVIRONMENT in {"production", "prod"} and settings.BOOTSTRAP_PASSWORD == "change-me-before-production":
     raise RuntimeError("PHANTOM_BOOTSTRAP_PASSWORD must be replaced before production startup")
+if settings.ENVIRONMENT in {"production", "prod"} and not settings.CREDENTIAL_ENCRYPTION_KEY:
+    raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY must be configured before production startup")
