@@ -11,6 +11,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from .runtime import bounded_snapshot
+
 UA = "PHANTOM/2.0 authorized-security-assessment"
 TIMEOUT = httpx.Timeout(8.0, connect=5.0)
 
@@ -79,8 +81,7 @@ def _external(value, host):
 
 
 async def web_trust_audit(target: str):
-    async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT, headers={"User-Agent": UA}) as client:
-        response = await client.get(target)
+    response = await bounded_snapshot(target)
 
     parser = SiteParser()
     try: parser.feed(response.text[:500_000])
