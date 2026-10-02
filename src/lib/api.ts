@@ -86,7 +86,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 
 export async function apiBlob(path: string, init: RequestInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers);
-  for (const [key, value] of Object.entries(authHeaders())) headers.set(key, value);
+  try {
+    const session = JSON.parse(localStorage.getItem('phantom.session') || 'null') as { access_token?: string } | null;
+    if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  } catch { /* malformed session is handled by the auth flow */ }
 
   const response = await fetch(buildUrl(path), { ...init, headers });
   if (!response.ok) return parseError(response);
