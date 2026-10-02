@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 
 from . import modules as scanner_modules
 from .modules import MODULES, PROFILES, authenticated_crawl
@@ -105,7 +106,7 @@ async def run_authorization_comparison(
             })
     return {
         "module": "authorization_comparison",
-        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "findings": findings[:100],
         "metrics": {
             "duration_ms": round((time.monotonic() - started) * 1000, 1),
