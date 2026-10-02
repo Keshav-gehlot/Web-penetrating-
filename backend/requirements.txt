@@ -12,3 +12,5 @@ pytest==8.4.2
 pytest-asyncio==1.2.0
 aiosqlite==0.21.0
 dnspython==2.8.0
+
+cryptography==50.0.2

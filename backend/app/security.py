@@ -1,5 +1,12 @@
 from __future__ import annotations
-import base64, hashlib, hmac, secrets
+
+import base64
+import hashlib
+import hmac
+import secrets
+
+from cryptography.fernet import Fernet, InvalidToken
+
 ITERATIONS = 310_000
 PREFIX = "pbkdf2_sha256"
 
@@ -23,3 +30,16 @@ def is_legacy_sha256(stored: str) -> bool:
 
 def verify_legacy_sha256(password: str, stored: str) -> bool:
     return hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored)
+
+def encrypt_credential(secret: str, key: str) -> str:
+    if not key:
+        raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY is not configured")
+    return Fernet(key.encode()).encrypt(secret.encode()).decode()
+
+def decrypt_credential(ciphertext: str, key: str) -> str:
+    if not key:
+        raise RuntimeError("PHANTOM_CREDENTIAL_ENCRYPTION_KEY is not configured")
+    try:
+        return Fernet(key.encode()).decrypt(ciphertext.encode()).decode()
+    except InvalidToken as exc:
+        raise RuntimeError("Stored assessment credential could not be decrypted") from exc

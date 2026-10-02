@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
-from .runtime import bounded_connect, bounded_dns_records, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket
+from .runtime import bounded_connect, bounded_dns_records, bounded_get, bounded_options, bounded_resolve, bounded_snapshot, scoped_tcp_socket, current_runtime
 from ..security_scope import scope_host_allowed
 from ..intelligence.cve import enrich_cpe, fingerprint_from_header
 
@@ -310,6 +310,74 @@ async def endpoint_inventory(target):
     return base("endpoint_inventory", endpoints=sorted(set(endpoints))[:500], forms=parser.forms)
 
 
+async def authorization_surface(target):
+    """Identify authorization-sensitive routes without attempting privilege escalation."""
+    response, parser = await html_parser(target)
+    host = urlparse(str(response.url)).hostname
+    sensitive_terms = ("admin", "account", "profile", "settings", "user", "billing", "manage", "api")
+    candidates = set()
+    for match in re.finditer(r'(?:href|action|src)=["\']([^"\']+)', response.text, re.I):
+        candidate = urljoin(str(response.url), match.group(1))
+        parsed = urlparse(candidate)
+        if parsed.hostname == host and any(term in (parsed.path or "").lower() for term in sensitive_terms):
+            candidates.add(candidate)
+    runtime = __import__(".runtime", globals(), locals(), ["_CURRENT"], 1)._CURRENT.get()
+    return base("authorization_surface", status=response.status_code, authenticated=bool(runtime and runtime.auth), candidate_count=len(candidates), candidates=sorted(candidates)[:100], note="Candidate routes only; privilege-boundary verification requires an explicitly configured comparison identity.")
+
+async def authenticated_endpoint_inventory(target):
+    return await authenticated_crawl(target)
+
+async def authenticated_crawl(target):
+    """Bounded same-origin crawl using the configured assessment authentication.
+
+    It follows only links/forms that remain on the original hostname. It never
+    submits forms or executes browser JavaScript.
+    """
+    parsed_target = urlparse(target)
+    target_host = parsed_target.hostname
+    queue = [target]
+    visited: set[str] = set()
+    discovered: set[str] = set()
+    observed: list[dict[str, object]] = []
+    max_pages = 25
+
+    while queue and len(visited) < max_pages:
+        current = queue.pop(0)
+        normalized = current.split("#", 1)[0]
+        if normalized in visited:
+            continue
+        visited.add(normalized)
+        try:
+            response = await http_snapshot(normalized)
+        except (httpx.HTTPError, RuntimeError):
+            continue
+
+        normalized_response_url = str(response.url).split("#", 1)[0]
+        discovered.add(normalized_response_url)
+        observed.append({"url": normalized_response_url, "status": response.status_code, "content_length": len(response.content)})
+        body = response.text[:settings.SCAN_MAX_RESPONSE_BYTES]
+        for match in re.finditer(r'(?:href|action)=["\']([^"\']+)', body, re.I):
+            candidate = urljoin(str(response.url), match.group(1)).split("#", 1)[0]
+            parsed = urlparse(candidate)
+            if parsed.scheme not in {"http", "https"} or parsed.hostname != target_host:
+                continue
+            if candidate not in visited and candidate not in discovered and len(queue) + len(visited) < max_pages:
+                discovered.add(candidate)
+                queue.append(candidate)
+
+    return base(
+        "authenticated_crawl",
+        authenticated=bool(current_runtime() and current_runtime().auth),
+        pages_scanned=len(visited),
+        endpoints=sorted(discovered)[:500],
+        observed=observed[:500],
+        max_pages=max_pages,
+        same_origin_only=True,
+        form_submission=False,
+        javascript_execution=False,
+    )
+
+
 async def http_header_analyzer(target):
     response = await http_snapshot(target)
     headers = {key.lower(): value for key, value in response.headers.items()}
@@ -427,6 +495,8 @@ MODULES = {
     "cors_audit": cors_audit,
     "technology_detection": tech_detection,
     "endpoint_inventory": endpoint_inventory,
+    "authenticated_endpoint_inventory": authenticated_endpoint_inventory,
+    "authorization_surface": authorization_surface,
 }
 
 PROFILES = {

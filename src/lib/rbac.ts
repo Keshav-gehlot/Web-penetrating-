@@ -8,7 +8,7 @@ export type Permission =
   | 'users:manage'
   | 'scan:create'
   | 'scan:view'
-  | 'scan:cancel'
+  | 'scan:cancel' | 'scan:credentials'
   | 'finding:view'
   | 'finding:edit'
   | 'finding:assign'
@@ -77,6 +77,7 @@ export function canAccessPath(path: string): boolean {
   const permissionByPath: Array<[string, Permission]> = [
     ['/scope', 'workspace:manage'],
     ['/scans', 'scan:view'],
+    ['/credentials', 'scan:credentials'],
     ['/schedules', 'scan:create'],
     ['/assets', 'scan:view'],
     ['/topology', 'scan:view'],

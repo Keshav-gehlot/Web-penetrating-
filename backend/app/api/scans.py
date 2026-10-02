@@ -8,14 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Principal
+from ..config import settings
 from ..database import SessionLocal, get_db
-from ..models import Asset, CVEIntelligence, Finding, Scan, WorkspaceScope
+from ..models import AssessmentCredential, Asset, CVEIntelligence, Finding, Scan, WorkspaceScope
 from ..observability import record_operational_event
 from ..queue import enqueue_scan
 from ..rbac import require_permission
 from ..realtime import bus
-from ..scanners.runner import MODULES, PROFILES, run_module
+from ..scanners.runner import MODULES, PROFILES, run_module, run_authorization_comparison
 from ..security_scope import ScopeViolation, normalize_target, scope_snapshot, validate_target, validate_target_against_scope
+from ..security import decrypt_credential
+from ..scanners.runtime import ScanAuth
 from .audit import record_audit
 from .findings import evidence_digest, fingerprint_for
 from .assets import ingest_scan_observations
@@ -26,10 +29,12 @@ router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 class ScanRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048)
     profile: str = Field(default="standard", pattern="^(quick|standard|deep|trust)$")
+    credential_id: str | None = None
+    comparison_credential_id: str | None = None
 
 
 def serialize_scan(scan: Scan) -> dict:
-    return {"id": scan.id, "target": scan.target, "host": scan.host, "profile": scan.profile, "modules": scan.modules, "status": scan.status, "created_at": scan.created_at.isoformat() if scan.created_at else None, "started_at": scan.started_at.isoformat() if scan.started_at else None, "completed_at": scan.completed_at.isoformat() if scan.completed_at else None, "error": scan.error, "attempt": scan.attempt, "worker_id": scan.worker_id, "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None, "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None, "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None}
+    return {"id": scan.id, "target": scan.target, "host": scan.host, "profile": scan.profile, "modules": scan.modules, "status": scan.status, "credential_id": scan.credential_id, "comparison_credential_id": scan.comparison_credential_id, "created_at": scan.created_at.isoformat() if scan.created_at else None, "started_at": scan.started_at.isoformat() if scan.started_at else None, "completed_at": scan.completed_at.isoformat() if scan.completed_at else None, "error": scan.error, "attempt": scan.attempt, "worker_id": scan.worker_id, "lease_expires_at": scan.lease_expires_at.isoformat() if scan.lease_expires_at else None, "cancel_requested_at": scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None, "cancelled_at": scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 
 
 def serialize_finding(finding: Finding) -> dict:
@@ -59,6 +64,16 @@ def _parse_dt(value):
         return None
 
 
+async def _load_scan_auth(db: AsyncSession, scan: Scan, credential_id: str | None = None) -> ScanAuth | None:
+    selected_id = credential_id if credential_id is not None else scan.credential_id
+    if not selected_id:
+        return None
+    credential = await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id == selected_id, AssessmentCredential.workspace_id == scan.workspace_id))
+    if not credential:
+        raise RuntimeError("Assessment credential is not available in the scan workspace")
+    secret = decrypt_credential(credential.secret_ciphertext, settings.CREDENTIAL_ENCRYPTION_KEY)
+    credential.last_used_at = datetime.now(timezone.utc)
+    return ScanAuth(kind=credential.kind, username=credential.username, secret=secret, header_name=credential.header_name)
 def severity_rank(value: str) -> int:
     return {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}.get(value.lower(), 0)
 
@@ -140,7 +155,8 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
 
                 await _op("module.started", f"Scanner module started: {module_name}", workspace_id=state.workspace_id, scan_id=state.id, metadata={"module": module_name, "index": index, "total": total})
                 await bus.publish(scan_id, {"event": "module.started", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
-                result = await run_module(module_name, scan.target, runtime_id=scan.id, scope=scope)
+                auth = await _load_scan_auth(db, scan)
+                result = await run_module(module_name, scan.target, runtime_id=scan.id, scope=scope, auth=auth)
                 result_status = str(result.get("status", "ok"))
                 if result_status in {"error", "timeout"}:
                     error = str(result.get("error") or f"Scanner module {module_name} failed")
@@ -200,6 +216,55 @@ async def execute_scan(scan_id: str, expected_worker: str | None = None) -> bool
                 await db.commit()
                 await _op("module.completed", f"Scanner module completed: {module_name}", workspace_id=scan.workspace_id, scan_id=scan.id, metadata={"module": module_name, "index": index, "total": total, "finding_count": len(seen), "metrics": result.get("metrics", {})})
                 await bus.publish(scan_id, {"event": "module.completed", "scan_id": scan_id, "module": module_name, "index": index, "total": total})
+
+            if scan.credential_id and scan.comparison_credential_id:
+                primary_auth = await _load_scan_auth(db, scan, scan.credential_id)
+                comparison_auth = await _load_scan_auth(db, scan, scan.comparison_credential_id)
+                if primary_auth and comparison_auth:
+                    comparison_result = await run_authorization_comparison(
+                        scan.target,
+                        primary_auth,
+                        comparison_auth,
+                        runtime_id=scan.id,
+                        scope=scope,
+                    )
+                    await ingest_scan_observations(db, scan, comparison_result)
+                    for item in comparison_result.get("findings", []):
+                        fingerprint = fingerprint_for(scan, item)
+                        existing = await db.scalar(select(Finding).where(Finding.scan_id == scan.id, Finding.fingerprint == fingerprint))
+                        if existing:
+                            existing.last_seen = datetime.now(timezone.utc)
+                            continue
+                        evidence = item.get("evidence") or {}
+                        comparison_finding = Finding(
+                            scan_id=scan.id,
+                            module=item.get("module", "authorization_comparison"),
+                            title=item.get("title", "Candidate authorization response differential"),
+                            severity=item.get("severity", "info"),
+                            status="open",
+                            fingerprint=fingerprint,
+                            description=item.get("description", ""),
+                            remediation=item.get("remediation", ""),
+                            evidence=evidence,
+                            evidence_hash=evidence_digest(evidence),
+                            evidence_source="scanner",
+                            confidence=float(item.get("confidence", 0.7)),
+                        )
+                        db.add(comparison_finding)
+                        await db.flush()
+                        await _op(
+                            "finding.created",
+                            f"Finding created: {comparison_finding.title}",
+                            workspace_id=scan.workspace_id,
+                            scan_id=scan.id,
+                            severity=comparison_finding.severity,
+                            metadata={"finding_id": comparison_finding.id, "module": comparison_finding.module, "evidence_hash": comparison_finding.evidence_hash},
+                        )
+                        await bus.publish(
+                            scan_id,
+                            {"event": "finding.created", "scan_id": scan_id, "finding": serialize_finding(comparison_finding)},
+                        )
+                    await db.commit()
 
             # Cross-module correlation is advisory: it links independent signals without treating candidates as proof.
             finding_rows = (await db.scalars(select(Finding).where(Finding.scan_id == scan.id))).all()
@@ -277,7 +342,26 @@ async def create_scan(payload: ScanRequest, request: Request, principal: Princip
         asset = Asset(host=target["host"], target=target["target"], workspace_id=principal.workspace_id)
         db.add(asset)
         await db.flush()
-    scan = Scan(id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile, modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id, workspace_id=principal.workspace_id, attempt=1)
+    credential = None
+    comparison_credential = None
+    if payload.credential_id:
+        credential = await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id == payload.credential_id, AssessmentCredential.workspace_id == principal.workspace_id))
+        if not credential:
+            raise HTTPException(400, "Assessment credential not found in workspace")
+    if payload.comparison_credential_id:
+        if not payload.credential_id:
+            raise HTTPException(400, "A primary credential is required for authorization comparison")
+        if payload.comparison_credential_id == payload.credential_id:
+            raise HTTPException(400, "Comparison credential must differ from the primary credential")
+        comparison_credential = await db.scalar(select(AssessmentCredential).where(AssessmentCredential.id == payload.comparison_credential_id, AssessmentCredential.workspace_id == principal.workspace_id))
+        if not comparison_credential:
+            raise HTTPException(400, "Comparison credential not found in workspace")
+    scan = Scan(
+        id=str(uuid4()), target=target["target"], host=target["host"], profile=payload.profile,
+        modules=list(PROFILES[payload.profile]), status="queued", asset_id=asset.id,
+        workspace_id=principal.workspace_id, credential_id=credential.id if credential else None,
+        comparison_credential_id=comparison_credential.id if comparison_credential else None, attempt=1
+    )
     db.add(scan)
     await record_audit(db, request, "scan.created", "scan", scan.id, {"target": scan.target, "profile": scan.profile, "scope_id": scope.get("id")}, principal)
     await db.commit()

@@ -31,7 +31,7 @@ PERMISSIONS: dict[Role, set[str]] = {
     Role.OWNER: {"*"},
     Role.ADMIN: {
         "workspace:manage", "scope:approve", "users:manage",
-        "scan:create", "scan:view", "scan:cancel",
+        "scan:create", "scan:view", "scan:cancel", "scan:credentials",
         "finding:view", "finding:edit", "finding:assign", "finding:close",
         "report:create", "report:export", "audit:view",
     },
