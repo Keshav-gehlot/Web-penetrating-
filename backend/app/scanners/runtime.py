@@ -61,11 +61,25 @@ async def bounded_get(target: str, path: str = "") -> httpx.Response:
 
 
 async def bounded_snapshot(target: str) -> httpx.Response:
-    _consume_request()
-    _assert_public_host(target)
-    async with httpx.AsyncClient(follow_redirects=True, max_redirects=settings.SCAN_MAX_REDIRECTS, timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS), headers={"User-Agent":"PHANTOM/2.0 authorized-security-assessment"}) as client:
-        response = await client.get(target)
-    _assert_public_host(str(response.url))
-    if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
-        raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit")
-    return response
+    # Follow redirects manually so every hop is validated before the next
+    # network connection is made. This prevents a public URL from redirecting
+    # the scanner into a private/link-local destination.
+    current = target
+    async with httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS),
+        headers={"User-Agent":"PHANTOM/2.0 authorized-security-assessment"},
+    ) as client:
+        for _ in range(settings.SCAN_MAX_REDIRECTS + 1):
+            _consume_request()
+            _assert_public_host(current)
+            response = await client.get(current)
+            if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
+                raise RuntimeError(f"Response exceeded {settings.SCAN_MAX_RESPONSE_BYTES} byte safety limit")
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                return response
+            location = response.headers.get("location")
+            if not location:
+                return response
+            current = urljoin(current, location)
+        raise RuntimeError(f"Redirect limit of {settings.SCAN_MAX_REDIRECTS} exceeded")
