@@ -17,6 +17,7 @@ from .audit import record_audit
 from .findings import fingerprint_for
 router=APIRouter(prefix="/api/v1/scans",tags=["scans"])
 class ScanRequest(BaseModel):target:str=Field(min_length=1,max_length=2048);profile:str=Field(default="standard",pattern="^(quick|standard|deep|trust)$")
+class ModuleRunRequest(BaseModel):target:str=Field(min_length=1,max_length=2048)
 def serialize_scan(scan):return {"id":scan.id,"target":scan.target,"host":scan.host,"profile":scan.profile,"modules":scan.modules,"status":scan.status,"created_at":scan.created_at.isoformat() if scan.created_at else None,"started_at":scan.started_at.isoformat() if scan.started_at else None,"completed_at":scan.completed_at.isoformat() if scan.completed_at else None,"error":scan.error,"attempt":scan.attempt,"worker_id":scan.worker_id,"lease_expires_at":scan.lease_expires_at.isoformat() if scan.lease_expires_at else None,"cancel_requested_at":scan.cancel_requested_at.isoformat() if scan.cancel_requested_at else None,"cancelled_at":scan.cancelled_at.isoformat() if scan.cancelled_at else None}
 def severity_rank(v):return {"info":0,"low":1,"medium":2,"high":3,"critical":4}.get(v.lower(),0)
 def serialize_finding(f):return {"id":f.id,"module":f.module,"title":f.title,"severity":f.severity,"status":f.status,"fingerprint":f.fingerprint,"cve":f.cve,"cwe":f.cwe,"cvss":f.cvss,"assignee":f.assignee,"description":f.description,"remediation":f.remediation,"evidence":f.evidence,"confidence":f.confidence}
@@ -60,6 +61,12 @@ async def create_scan(request:ScanRequest,request_ctx:Request,principal:Principa
  if not asset:asset=Asset(host=target["host"],target=target["target"],workspace_id=principal.workspace_id);db.add(asset);await db.flush()
  scan=Scan(id=str(uuid4()),target=target["target"],host=target["host"],profile=request.profile,modules=list(PROFILES[request.profile]),status="queued",asset_id=asset.id,workspace_id=principal.workspace_id,attempt=1);db.add(scan);await record_audit(db,request_ctx,"scan.created","scan",scan.id,{"target":scan.target,"profile":scan.profile},principal);await db.commit();await db.refresh(scan)
  await enqueue_scan(scan.id);await bus.publish(scan.id,{"event":"scan.created","scan_id":scan.id});return serialize_scan(scan)
+@router.post("/modules/{module_name}/run")
+async def run_single_module(module_name:str,request:ModuleRunRequest,principal:Principal=Depends(require_permission("scan:create"))):
+ target=validate_target(request.target)["target"]
+ if module_name not in MODULES:raise HTTPException(404,"Scanner module not found")
+ return await run_module(module_name,target,runtime_id=f"api-module:{module_name}:{target}")
+
 @router.post("/{scan_id}/run")
 async def run_scan(scan_id:str,request_ctx:Request,principal:Principal=Depends(require_permission("scan:create")),db:AsyncSession=Depends(get_db)):
  scan=await db.scalar(select(Scan).where(Scan.id==scan_id,Scan.workspace_id==principal.workspace_id))
