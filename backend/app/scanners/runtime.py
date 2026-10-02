@@ -221,7 +221,7 @@ async def bounded_options(target: str) -> httpx.Response:
     async with httpx.AsyncClient(
         follow_redirects=False,
         timeout=httpx.Timeout(settings.SCAN_HTTP_TIMEOUT_SECONDS, connect=settings.SCAN_CONNECT_TIMEOUT_SECONDS),
-        headers={"User-Agent": "PHANTOM/2.0 authorized-security-assessment"},
+        headers=_request_headers(),
     ) as client:
         response = await client.options(url)
     if len(response.content) > settings.SCAN_MAX_RESPONSE_BYTES:
