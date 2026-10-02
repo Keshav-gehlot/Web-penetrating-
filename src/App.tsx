@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import AssetManagement from './pages/AssetManagement';
 import Vulnerabilities from './pages/Vulnerabilities';
 import Scans from './pages/Scans';
+import Credentials from './pages/Credentials';
 import LiveScan from './pages/LiveScan';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
@@ -70,6 +71,7 @@ function Protected() {
             <Route path="/scope" element={<ScopeManager />} />
             <Route path="/vulnerabilities" element={<Vulnerabilities />} />
             <Route path="/scans" element={<Scans />} />
+            <Route path="/credentials" element={<Credentials />} />
             <Route path="/scans/live" element={<LiveScan />} />
             <Route path="/schedules" element={<Schedules />} />
             <Route path="/reports" element={<Reports />} />
