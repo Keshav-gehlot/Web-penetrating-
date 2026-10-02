@@ -118,29 +118,75 @@ def _category(i):
     return next(c for lo,hi,c in _RANGES if lo <= i <= hi)
 
 def _strategy(name):
-    n=name.lower()
-    for key, strategy in (
-        ("sql","sql"),("xss","reflection"),("csrf","csrf"),("code execution","exec"),
-        ("command injection","exec"),("ssi","ssi"),("ldap","ldap"),("xpath","xpath"),
-        ("xml","xml"),("template injection","template"),("session","session"),
-        ("brute","auth"),("password","credential"),("authentication","auth"),
-        ("credential","auth"),("cookie","cookie"),("encryption","crypto"),("idor","idor"),
-        ("data leakage","secret"),("storage","storage"),("security header","headers"),
-        ("file","file"),("directory","directory"),("api","api"),("port","service"),
-        ("access control","access"),("authorization","access"),("privilege","privilege"),
-        ("disclosure","disclosure"),("unpatched","version"),("cors","cors"),
-        ("deserialization","deserialize"),("object injection","deserialize"),("tampering","tamper"),
-        ("rate","rate"),("validation","input"),("mitm","tls"),("transport","tls"),
-        ("ssl/tls","tls"),("protocol","transport"),("dom","dom"),("cross-origin","cross_origin"),
-        ("cache","cache"),("clickjacking","clickjacking"),("html5","html5"),("denial","dos"),
-        ("resource exhaustion","resource"),("slowloris","slowloris"),("ssrf","ssrf"),
-        ("parameter pollution","hpp"),("redirect","redirect"),("logging","logging"),
-        ("business","business"),("order processing","business"),("price","business"),
-        ("user-based","business"),("mobile","mobile"),("iot","iot"),("smart homes","iot"),
-        ("remember","remember"),("captcha","captcha"),("mime","mime"),("content security","csp"),
-        ("race","race"),("enumeration","enumeration"),("zero-day","zeroday"),("day-zero","zeroday")
-    ):
-        if key in n: return strategy
+    """Map each roadmap item to an intentional scanner strategy.
+
+    Matching is phrase/token based rather than arbitrary substring matching. This
+    prevents names such as "session" or "transport" from accidentally matching
+    "SSI" or "port".
+    """
+    n = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    phrases = (
+        (("sql injection", "blind sql injection"), "sql"),
+        (("cross site scripting", "dom based xss"), "reflection"),
+        (("cross site request forgery",), "csrf"),
+        (("remote code execution", "command injection", "os command injection"), "exec"),
+        (("xml injection", "xml external entity", "xml entity expansion", "xml bomb", "xml denial of service"), "xml"),
+        (("ldap injection",), "ldap"),
+        (("xpath injection",), "xpath"),
+        (("html injection",), "html_injection"),
+        (("server side includes",), "ssi"),
+        (("server side template injection",), "template"),
+        (("session fixation", "session hijacking", "session timeout"), "session"),
+        (("brute force", "insecure authentication", "credential reuse", "weak authentication on iot devices"), "auth"),
+        (("password cracking", "weak password storage", "default passwords"), "credential"),
+        (("cookie theft",), "cookie"),
+        (("inadequate encryption",), "crypto"),
+        (("insecure direct object references",), "idor"),
+        (("data leakage", "api key exposure"), "secret"),
+        (("unencrypted data storage", "insecure data storage"), "storage"),
+        (("security header",), "headers"),
+        (("insecure file handling", "file inclusion"), "file"),
+        (("directory listing",), "directory"),
+        (("unprotected api endpoints", "insecure api endpoints", "api abuse", "insecure mobile api endpoints"), "api"),
+        (("open ports and services",), "service"),
+        (("improper access controls", "inadequate authorization", "missing function level access control", "forceful browsing"), "access"),
+        (("privilege escalation",), "privilege"),
+        (("information disclosure",), "disclosure"),
+        (("unpatched software", "unpatched vulnerabilities"), "version"),
+        (("misconfigured cors",), "cors"),
+        (("deserialization", "object injection"), "deserialize"),
+        (("data tampering",), "tamper"),
+        (("lack of rate limiting",), "rate"),
+        (("inadequate input validation", "inconsistent validation"), "input"),
+        (("man in the middle", "insufficient transport layer security", "insecure ssl tls configuration"), "tls"),
+        (("insecure communication protocols",), "transport"),
+        (("insecure cross origin communication",), "cross_origin"),
+        (("browser cache poisoning",), "cache"),
+        (("clickjacking",), "clickjacking"),
+        (("html5 security issues",), "html5"),
+        (("distributed denial of service", "application layer dos"), "dos"),
+        (("resource exhaustion",), "resource"),
+        (("slowloris",), "slowloris"),
+        (("server side request forgery", "blind ssrf", "time based blind ssrf"), "ssrf"),
+        (("http parameter pollution",), "hpp"),
+        (("insecure redirects and forwards",), "redirect"),
+        (("security header bypass",), "headers"),
+        (("insufficient logging and monitoring",), "logging"),
+        (("business logic vulnerabilities", "order processing vulnerabilities", "price manipulation", "user based flaws"), "business"),
+        (("insecure data transmission on mobile devices", "insecure mobile api endpoints", "mobile app reverse engineering", "insecure data storage on mobile devices"), "mobile"),
+        (("insecure iot device management", "iot device vulnerabilities", "unauthorized access to smart homes", "iot data privacy issues"), "iot"),
+        (("insecure remember me",), "remember"),
+        (("captcha bypass",), "captcha"),
+        (("mime sniffing", "x content type options bypass"), "mime"),
+        (("content security policy bypass",), "csp"),
+        (("race conditions",), "race"),
+        (("account enumeration",), "enumeration"),
+        (("unknown vulnerabilities",), "manual"),
+        (("day zero exploits",), "zeroday"),
+    )
+    for variants, strategy in phrases:
+        if any(n == phrase or phrase in n for phrase in variants):
+            return strategy
     return "manual"
 
 COVERAGE_CATALOG = [(i, name, _category(i), _strategy(name)) for i, name in enumerate(_NAMES, 1)]
