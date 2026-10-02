@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from sqlalchemy import text
 
 from ..database import SessionLocal
@@ -31,8 +31,10 @@ async def database_ready() -> bool:
 
 
 @router.get("/ready")
-async def readiness():
+async def readiness(response: Response):
     database = await database_ready()
     redis = await redis_ready()
     ready = database and redis
+    if not ready:
+        response.status_code = 503
     return {"status": "ready" if ready else "not_ready", "dependencies": {"database": database, "redis": redis}}
