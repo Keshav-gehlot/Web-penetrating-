@@ -127,7 +127,8 @@ def _strategy(name):
     n = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
     phrases = (
         (("sql injection", "blind sql injection"), "sql"),
-        (("cross site scripting", "dom based xss"), "reflection"),
+        (("dom based xss",), "dom"),
+        (("cross site scripting",), "reflection"),
         (("cross site request forgery",), "csrf"),
         (("remote code execution", "command injection", "os command injection"), "exec"),
         (("xml injection", "xml external entity", "xml entity expansion", "xml bomb", "xml denial of service"), "xml"),
